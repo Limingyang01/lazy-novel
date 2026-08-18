@@ -26,7 +26,12 @@ suite('Pager (sliding window)', () => {
   });
 
   test('scroll delta moves by windowSize', () => {
-    const text = 'abcdefghij'.repeat(30); // 300 chars
+    // Use a string with monotonically increasing chars so every offset slice is unique.
+    // Pager.windowSize = 80 means we need at least 160 unique chars to guarantee
+    // window[0..80) ≠ window[80..160).
+    const text = Array.from({ length: 300 }, (_, i) =>
+      String.fromCharCode(0x4e00 + i), // CJK Unified Ideographs (each is unique)
+    ).join('');
     const p = new Pager({ windowSize: 80 });
     const at0 = p.window(text, 0);
     const at80 = p.window(text, 80);
