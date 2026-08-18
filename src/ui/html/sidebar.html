@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    body { font-family: var(--vscode-font-family); padding: 8px; }
+    .file-list, .chapter-list { list-style: none; padding: 0; }
+    .file-item, .chapter-item { padding: 4px 8px; cursor: pointer; }
+    .file-item:hover, .chapter-item:hover { background: var(--vscode-list-hoverBackground); }
+    .opacity-control { margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h3>文件列表</h3>
+  <ul class="file-list" id="file-list"></ul>
+  <h3>章节列表</h3>
+  <ul class="chapter-list" id="chapter-list"></ul>
+  <div class="opacity-control">
+    <label>状态栏透明度: <input type="range" id="opacity" min="5" max="100" value="100" /></label>
+  </div>
+  <script src="sidebar.js"></script>
+</body>
+</html>
