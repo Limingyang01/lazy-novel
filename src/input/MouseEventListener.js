@@ -1,4 +1,7 @@
 // src/input/MouseEventListener.js
+// Spec 1: verbatim extract from thief-reader; NOT WIRED in the new extension.js.
+// Pending Spec 3 hover-preview redesign. File retained for spec diff continuity;
+// remove or rewrite when hover-preview is implemented.
 'use strict';
 
 const vscode = require('vscode');

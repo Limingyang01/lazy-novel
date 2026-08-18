@@ -1,4 +1,6 @@
 // src/input/ScrollWheelHandler.js
+// Spec 1: verbatim extract from thief-reader; NOT WIRED in the new extension.js.
+// Pending Spec 3 hover-preview redesign. File retained for spec diff continuity.
 'use strict';
 
 /**

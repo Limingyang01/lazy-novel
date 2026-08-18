@@ -1,4 +1,7 @@
 // src/storage/StorageManager.js
+// Spec 1: legacy-parity adapter; NOT USED by the new extension.js
+// (which wires BookRepository directly). Retained for spec diff continuity;
+// per ledger R2, deletion is deferred to a future spec.
 'use strict';
 
 const { BookRepository } = require('../library/BookRepository');
