@@ -1,7 +1,18 @@
 import globals from "globals";
 
 export default [{
-    files: ["**/*.js"],
+    ignores: [
+        "node_modules/**",
+        "node_modules",
+        "out/**",
+        "dist/**",
+        ".vscode-test/**",
+        "coverage/**",
+        "**/*.vsix",
+        "yarn.lock",
+        "package-lock.json",
+    ],
+    files: ["src/**/*.js", "test/**/*.js", "extension.js"],
     languageOptions: {
         globals: {
             ...globals.commonjs,

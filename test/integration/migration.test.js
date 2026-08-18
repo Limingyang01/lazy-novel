@@ -1,11 +1,16 @@
 // test/integration/migration.test.js
 const assert = require('assert');
-const vscode = require('vscode');
 const { migrateIfNeeded } = require('../../src/library/Migration');
 const { GLOBAL_STATE_KEYS } = require('../../src/storage/Schema');
 
 suite('Migration', () => {
   test('copies thief-reader.files to lazy-novel.books with translated fields', async () => {
+    // Skip gracefully when the test host has not injected an ExtensionContext
+    // (Task 14 wires `global.__lazyNovelTestContext`; until then this test skips.)
+    const ctx = global.__lazyNovelTestContext;
+    if (!ctx) {
+      return;
+    }
     // Seed old key
     const oldFiles = [
       {
@@ -22,16 +27,6 @@ suite('Migration', () => {
         chapterPositions: { 0: 0, 1: 100 },
       },
     ];
-    await vscode.workspace
-      .getConfiguration()
-      .update('legacy.thief-reader.files', null, vscode.ConfigurationTarget.Global);
-    await vscode.extensions.getExtension('neroneroffy.lazy-novel');
-    // Direct globalState seed (the test runner exposes a real ExtensionContext via the host)
-    const ctx = global.__lazyNovelTestContext;
-    if (!ctx) {
-      // Fallback: skip if test host doesn't expose context
-      return;
-    }
     await ctx.globalState.update('thief-reader.files', oldFiles);
     await ctx.globalState.update(GLOBAL_STATE_KEYS.books, undefined);
 

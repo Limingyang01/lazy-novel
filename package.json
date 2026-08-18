@@ -5,11 +5,6 @@
   "version": "0.1.0",
   "publisher": "neroneroffy",
   "icon": "main-icon.png",
-  "repository": "https://github.com/neroneroffy/thief-reader",
-  "author": {
-    "name": "neroneroffy",
-    "url": "https://github.com/neroneroffy"
-  },
   "license": "MIT",
   "keywords": [
     "vscode",
@@ -128,7 +123,7 @@
     }
   },
   "scripts": {
-    "lint": "eslint .",
+    "lint": "eslint extension.js src test",
     "pretest": "npm run lint",
     "test": "vscode-test"
   },
