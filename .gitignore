@@ -1,0 +1,28 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node
+node_modules/
+yarn-error.log
+npm-debug.log
+
+# Test
+.vscode-test/
+coverage/
+out/
+
+# Package
+*.vsix
+
+# Plan scratch space (gitignored per SDD skill)
+.superpowers/
+
+# Lazy Novel build artifacts (future)
+dist/
