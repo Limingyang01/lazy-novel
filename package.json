@@ -82,14 +82,38 @@
       }
     ],
     "keybindings": [
-      { "command": "lazyNovel.previousPage", "key": "alt+shift+left" },
-      { "command": "lazyNovel.nextPage", "key": "alt+shift+right" },
-      { "command": "lazyNovel.scrollLeft", "key": "alt+left" },
-      { "command": "lazyNovel.scrollRight", "key": "alt+right" },
-      { "command": "lazyNovel.toggleVisibility", "key": "shift+space" },
-      { "command": "lazyNovel.showHoverPreview", "key": "ctrl+alt+h" },
-      { "command": "lazyNovel.hideHoverPreview", "key": "ctrl+alt+shift+h" },
-      { "command": "lazyNovel.openBookshelf", "key": "ctrl+shift+l" }
+      {
+        "command": "lazyNovel.previousPage",
+        "key": "alt+shift+left"
+      },
+      {
+        "command": "lazyNovel.nextPage",
+        "key": "alt+shift+right"
+      },
+      {
+        "command": "lazyNovel.scrollLeft",
+        "key": "alt+left"
+      },
+      {
+        "command": "lazyNovel.scrollRight",
+        "key": "alt+right"
+      },
+      {
+        "command": "lazyNovel.toggleVisibility",
+        "key": "shift+space"
+      },
+      {
+        "command": "lazyNovel.showHoverPreview",
+        "key": "ctrl+alt+h"
+      },
+      {
+        "command": "lazyNovel.hideHoverPreview",
+        "key": "ctrl+alt+shift+h"
+      },
+      {
+        "command": "lazyNovel.openBookshelf",
+        "key": "ctrl+shift+l"
+      }
     ],
     "viewsContainers": {
       "activitybar": [
@@ -128,15 +152,16 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "pdf-parse": "^1.1.1",
-    "epub2": "^3.0.2"
+    "epub2": "^3.0.2",
+    "pdf-parse": "^1.1.1"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "eslint": "^9.36.0",
+    "@types/vscode": "^1.85.0",
     "@vscode/test-cli": "^0.0.11",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.36.0",
+    "sinon": "^17.0.1"
   }
 }
