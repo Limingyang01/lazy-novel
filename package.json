@@ -31,11 +31,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "lazyNovel.open",
-        "title": "Lazy Novel: 打开",
-        "category": "Lazy Novel"
-      },
-      {
         "command": "lazyNovel.previousPage",
         "title": "Lazy Novel: 上一页",
         "category": "Lazy Novel"
@@ -74,16 +69,6 @@
         "command": "lazyNovel.hideHoverPreview",
         "title": "Lazy Novel: 隐藏悬停预览",
         "category": "Lazy Novel"
-      },
-      {
-        "command": "lazyNovel.openBookshelf",
-        "title": "Lazy Novel: 打开阅读面板",
-        "category": "Lazy Novel"
-      },
-      {
-        "command": "lazyNovel.scanFolder",
-        "title": "Lazy Novel: 扫描文件夹",
-        "category": "Lazy Novel"
       }
     ],
     "keybindings": [
@@ -93,8 +78,7 @@
       { "command": "lazyNovel.scrollRight", "key": "alt+right" },
       { "command": "lazyNovel.toggleVisibility", "key": "shift+space" },
       { "command": "lazyNovel.showHoverPreview", "key": "ctrl+alt+h" },
-      { "command": "lazyNovel.hideHoverPreview", "key": "ctrl+alt+shift+h" },
-      { "command": "lazyNovel.openBookshelf", "key": "ctrl+shift+l" }
+      { "command": "lazyNovel.hideHoverPreview", "key": "ctrl+alt+shift+h" }
     ],
     "viewsContainers": {
       "activitybar": [

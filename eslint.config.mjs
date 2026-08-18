@@ -1,6 +1,9 @@
 import globals from "globals";
 
 export default [{
+    // .vscode-test 是下载的整个 VSCode 发行版，不排除会让 eslint 撑爆 V8 堆
+    ignores: [".vscode-test/**", "node_modules/**"],
+}, {
     files: ["**/*.js"],
     languageOptions: {
         globals: {

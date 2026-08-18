@@ -523,7 +523,7 @@ class FloatingWindowManager {
 	 * 从配置中加载弹窗文字透明度
 	 */
 	_loadPopupOpacity() {
-		const config = vscode.workspace.getConfiguration('thief-reader');
+		const config = vscode.workspace.getConfiguration('lazyNovel');
 		const savedOpacity = config.get('popupTextOpacity');
 		if (savedOpacity !== undefined) {
 			this._popupTextOpacity = savedOpacity;
@@ -535,7 +535,7 @@ class FloatingWindowManager {
 	 */
 	_savePopupOpacity(value) {
 		this._popupTextOpacity = Math.max(10, Math.min(100, value));
-		vscode.workspace.getConfiguration('thief-reader').update('popupTextOpacity', this._popupTextOpacity, true);
+		vscode.workspace.getConfiguration('lazyNovel').update('popupTextOpacity', this._popupTextOpacity, true);
 	}
 
 	/**
@@ -1641,6 +1641,7 @@ class StorageManager {
 				chapterPositions: file.chapterPositions || {}
 			}));
 			
+			// ponytail: 存储键沿用 thief-reader.* 前缀，改名会让已有书库读不到；需要改名时先写一次性迁移
 			await this._context.globalState.update('thief-reader.files', serializedFiles);
 		} catch (error) {
 			console.error('保存文件列表失败:', error);
@@ -1739,7 +1740,7 @@ class ThiefReaderWebviewProvider {
 		this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 		this._statusBarItem.text = "reader: 准备就绪 📖";
 		this._statusBarItem.tooltip = '点击显示/隐藏章节预览 • 使用 Alt + 方向键滚动文字';
-		this._statusBarItem.command = 'thief-reader.toggleChapterPreview'; // 设置点击命令
+		this._statusBarItem.command = 'lazyNovel.toggleChapterPreview'; // 设置点击命令
 		this._statusBarItem.show();
 		this._context.subscriptions.push(this._statusBarItem);
 	}
@@ -2295,12 +2296,17 @@ class ThiefReaderWebviewProvider {
 				</div>
 			`).join('') : '';
 
+		// 区分「没选文件」和「选了文件但一章都没识别出来」，否则后者会误报成前者
+		const chapterEmptyHint = this._currentFile
+			? `未能从《${this._currentFile.name}》中识别出章节，请检查章节标题格式`
+			: '请先选择一个文件或粘贴文本内容';
+
 		return `<!DOCTYPE html>
 		<html lang="zh-CN">
 		<head>
 			<meta charset="UTF-8">
 			<meta name="viewport" content="width=device-width, initial-scale=1.0">
-			<title>thief-reader</title>
+			<title>Lazy Novel</title>
 			<style>
 				body {
 					font-family: var(--vscode-font-family);
@@ -2516,7 +2522,7 @@ class ThiefReaderWebviewProvider {
 		</head>
 		<body>
 			<div class="header">
-				<div class="title">📖 thief-reader</div>
+				<div class="title">📖 Lazy Novel</div>
 			</div>
 
 			<div class="section">
@@ -2545,7 +2551,7 @@ class ThiefReaderWebviewProvider {
 			<div class="section">
 				<div class="section-title">章节列表</div>
 				<div id="chapter-list">
-					${chapterListHtml || '<div class="empty-state">请先选择一个文件或粘贴文本内容</div>'}
+					${chapterListHtml || `<div class="empty-state">${chapterEmptyHint}</div>`}
 				</div>
 			</div>
 
@@ -2777,11 +2783,9 @@ class ThiefReaderWebviewProvider {
 				vscode.window.showInformationMessage(`成功加载${fileInfo.type}文件: ${fileName}`);
 			}
 			
-			// 保存状态
-			this._saveCurrentState();
-			
-			// 刷新界面
-			this._refreshView();
+			// 加载完直接选中，否则章节列表要等用户再点一次文件名才出现
+			// （内部已包含 _saveCurrentState + _refreshView）
+			await this._selectFileFromList(fileInfo.id);
 		} catch (error) {
 			this._statusBarItem.text = "reader: 加载失败";
 			vscode.window.showErrorMessage(`加载文件失败: ${error.message}`);
@@ -3091,9 +3095,9 @@ class ThiefReaderWebviewProvider {
 
 		// 扩展的章节检测规则，适用于PDF和TXT
 		const chapterPatterns = [
-			// 中文章节模式
-			/^第[一二三四五六七八九十\d]+章\s*[：:\-]?\s*(.+)/,
-			/^第\d+章\s*[：:\-]?\s*(.+)/,
+			// 中文章节模式：数字含 百千万零两 等（第一百零八章），标题用 (.*) 以兼容「第一章」这种无标题写法
+			/^第[零一二三四五六七八九十百千万亿两\d]+章\s*[：:\-]?\s*(.*)$/,
+			/^第\d+章\s*[：:\-]?\s*(.*)$/,
 			/^[一二三四五六七八九十]+、\s*(.+)/,
 			/^[\d]+\.\s*(.+)/,
 			/^[\d]+[\s]*[、．.]\s*(.+)/,
@@ -3371,25 +3375,25 @@ class ThiefReaderWebviewProvider {
 	 */
 	_registerKeyBindings() {
 		// 注册翻页命令 (Alt + Shift + 左右方向键)
-		const previousPageCommand = vscode.commands.registerCommand('thief-reader.previousPage', () => {
+		const previousPageCommand = vscode.commands.registerCommand('lazyNovel.previousPage', () => {
 			this._previousPage();
 		});
 
-		const nextPageCommand = vscode.commands.registerCommand('thief-reader.nextPage', () => {
+		const nextPageCommand = vscode.commands.registerCommand('lazyNovel.nextPage', () => {
 			this._nextPage();
 		});
 
 		// 注册滑动命令 (Alt + 左右方向键)
-		const scrollLeftCommand = vscode.commands.registerCommand('thief-reader.scrollLeft', () => {
+		const scrollLeftCommand = vscode.commands.registerCommand('lazyNovel.scrollLeft', () => {
 			this._scrollLeft();
 		});
 
-		const scrollRightCommand = vscode.commands.registerCommand('thief-reader.scrollRight', () => {
+		const scrollRightCommand = vscode.commands.registerCommand('lazyNovel.scrollRight', () => {
 			this._scrollRight();
 		});
 
 		// 注册切换显示命令 (Shift + 空格键)
-		const toggleVisibilityCommand = vscode.commands.registerCommand('thief-reader.toggleVisibility', () => {
+		const toggleVisibilityCommand = vscode.commands.registerCommand('lazyNovel.toggleVisibility', () => {
 			this._toggleStatusBarVisibility();
 		});
 
@@ -3498,7 +3502,7 @@ class ThiefReaderWebviewProvider {
 		this._applyOpacityToStatusBar();
 		
 		// 保存设置到VS Code配置
-		vscode.workspace.getConfiguration('thief-reader').update('statusBarOpacity', this._opacity, true);
+		vscode.workspace.getConfiguration('lazyNovel').update('statusBarOpacity', this._opacity, true);
 	}
 
 	/**
@@ -3527,7 +3531,7 @@ class ThiefReaderWebviewProvider {
 	 * 从配置中加载透明度
 	 */
 	_loadOpacity() {
-		const config = vscode.workspace.getConfiguration('thief-reader');
+		const config = vscode.workspace.getConfiguration('lazyNovel');
 		const savedOpacity = config.get('statusBarOpacity');
 		if (savedOpacity !== undefined) {
 			this._opacity = savedOpacity;
@@ -3553,28 +3557,22 @@ class ThiefReaderWebviewProvider {
 function activate(context) {
 	// 使用控制台输出诊断信息 (console.log) 和错误 (console.error)
 	// 这行代码只会在扩展激活时执行一次
-	console.log('恭喜，您的扩展 "thief-reader" 现在已激活！');
+	console.log('恭喜，您的扩展 "Lazy Novel" 现在已激活！');
 
 	// 创建 WebView 提供者
 	const provider = new ThiefReaderWebviewProvider(context);
 
 	// 注册 WebView 提供者
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider('thief-reader-main', provider)
+		vscode.window.registerWebviewViewProvider('lazy-novel-main', provider)
 	);
 
-	// 保留原有的 Hello World 命令
-	const disposable = vscode.commands.registerCommand('thief-reader.helloWorld', function () {
-		// 向用户显示消息框
-		vscode.window.showInformationMessage('来自 thief-reader 的问候！');
-	});
-
 	// 章节预览功能的切换命令
-	const toggleChapterPreviewCommand = vscode.commands.registerCommand('thief-reader.toggleChapterPreview', function () {
+	const toggleChapterPreviewCommand = vscode.commands.registerCommand('lazyNovel.toggleChapterPreview', function () {
 		provider.toggleChapterPreview();
 	});
 
-	const showHoverPreviewCommand = vscode.commands.registerCommand('thief-reader.showHoverPreview', function () {
+	const showHoverPreviewCommand = vscode.commands.registerCommand('lazyNovel.showHoverPreview', function () {
 		// 直接显示悬停预览（用于测试）
 		if (provider._currentFile && provider._currentChapter !== null) {
 			const content = provider._mouseEventListener._getCurrentReaderContent();
@@ -3589,13 +3587,12 @@ function activate(context) {
 		}
 	});
 
-	const hideHoverPreviewCommand = vscode.commands.registerCommand('thief-reader.hideHoverPreview', function () {
+	const hideHoverPreviewCommand = vscode.commands.registerCommand('lazyNovel.hideHoverPreview', function () {
 		// 隐藏悬停预览
 		provider._floatingWindowManager.hide();
 		vscode.window.showInformationMessage('悬停预览已隐藏');
 	});
 
-	context.subscriptions.push(disposable);
 	context.subscriptions.push(toggleChapterPreviewCommand);
 	context.subscriptions.push(showHoverPreviewCommand);
 	context.subscriptions.push(hideHoverPreviewCommand);
