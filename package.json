@@ -146,6 +146,7 @@
     "test": "vscode-test"
   },
   "dependencies": {
+    "iconv-lite": "^0.6.3",
     "pdf-parse": "^1.1.1",
     "epub2": "^3.0.2"
   },

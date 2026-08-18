@@ -5,6 +5,35 @@ const fs = require('fs')
 const path = require('path')
 const pdf = require('pdf-parse')
 const EPub = require('epub2').EPub
+const iconv = require('iconv-lite')
+
+/**
+ * 把 TXT 文件读成字符串，自动适配编码。
+ * Node 内置只认识 UTF-8，但中文小说里 GBK/GB18030 极其常见（特别是 Windows 上）
+ * ——按 UTF-8 硬读会变成乱码，章节正则一条都匹配不到。
+ * 策略：先剥 UTF-8 BOM；再试 UTF-8 一次，结果里若 U+FFFD 替换字符**比例过高**，
+ * 就改用 GB18030 重读（GB18030 是 GBK 的超集）。
+ * 不能见一个 U+FFFD 就回退：合法 UTF-8 文件偶尔含 1-2 个真替换字符（极少见但存在）
+ * 会被误判为 GBK → 重读后引入新乱码。用 0.1% 比例阈值更稳。
+ */
+function readTextFileAutoEncoding(filePath) {
+	const buf = fs.readFileSync(filePath)
+	// UTF-8 BOM: EF BB BF
+	if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+		return buf.toString('utf8').slice(1)
+	}
+	const utf8 = buf.toString('utf8')
+	// 极短文本（< 200 字符）不做比例判定，避免除零和抖小样本
+	if (utf8.length < 200) {
+		return utf8
+	}
+	// U+FFFD 是 UTF-8 解码失败的「替换字符」。比例 > 0.1% 才视为真不是 UTF-8。
+	const replacementCount = (utf8.match(/�/g) || []).length
+	if (replacementCount / utf8.length > 0.001) {
+		return iconv.decode(buf, 'gb18030')
+	}
+	return utf8
+}
 
 // 状态栏一屏显示的字符数，同时也是一次翻页的跨度。
 // 状态栏可用宽度取决于窗口宽度和其他状态栏项，VSCode 没有 API 能查到，
@@ -2118,12 +2147,16 @@ class ThiefReaderWebviewProvider {
 			const pdfData = await pdf(fileBuffer)
 			fileContent = pdfData.text
 			pageCount = pdfData.numpages
+			// PDF 文本天然带段落分隔符，走 fallback 会被切成几百个"假章节"，
+			// 标题还是段落前 10 字，没法看。只在 TXT 走 fallback，PDF 保持原行为。
 			chapters = this._extractChapters(fileContent)
 		} else if (fileExtension === '.txt') {
-			fileContent = fs.readFileSync(filePath, 'utf8')
+			// 直接读 utf8 在 GBK 文件上会得到一整页乱码，章节正则全 miss。
+			// 走自动编码识别：UTF-8 BOM → 试 UTF-8 → 不行就回退 GB18030。
+			fileContent = readTextFileAutoEncoding(filePath)
 			const lineCount = fileContent.split('\n').length
 			pageCount = Math.ceil(lineCount / 50)
-			chapters = this._extractChapters(fileContent)
+			chapters = this._extractChaptersWithFallback(fileContent)
 		} else if (fileExtension === '.epub') {
 			const epubData = await this._parseEpub(filePath)
 			fileContent = epubData.content
@@ -2823,18 +2856,20 @@ class ThiefReaderWebviewProvider {
 			let chapters = []
 
 			if (fileExtension === '.pdf') {
-				// 解析PDF文件
+				// 解析PDF文件。PDF 文本天然带段落分隔符，走 fallback 会被切成几百个
+				// "假章节"，标题还是段落前 10 字，没法看。只在 TXT 走 fallback。
 				const fileBuffer = fs.readFileSync(filePath)
 				const pdfData = await pdf(fileBuffer)
 				fileContent = pdfData.text
 				pageCount = pdfData.numpages
 				chapters = this._extractChapters(fileContent)
 			} else if (fileExtension === '.txt') {
-				// 解析TXT文件
-				fileContent = fs.readFileSync(filePath, 'utf8')
+				// 解析TXT文件。直接 readFileSync(..., 'utf8') 在 GBK 文件上会得到一整页乱码，
+				// 章节正则全 miss。走自动编码识别：UTF-8 BOM → 试 UTF-8 → 不行回退 GB18030。
+				fileContent = readTextFileAutoEncoding(filePath)
 				const lineCount = fileContent.split('\n').length
 				pageCount = Math.ceil(lineCount / 50)
-				chapters = this._extractChapters(fileContent)
+				chapters = this._extractChaptersWithFallback(fileContent)
 			} else if (fileExtension === '.epub') {
 				// 解析EPUB文件
 				const epubData = await this._parseEpub(filePath)
@@ -3224,6 +3259,10 @@ class ThiefReaderWebviewProvider {
 			// 中文章节模式：数字含 百千万零两 等（第一百零八章），标题用 (.*) 以兼容「第一章」这种无标题写法
 			/^第[零一二三四五六七八九十百千万亿两\d]+章\s*[：:\-]?\s*(.*)$/,
 			/^第\d+章\s*[：:\-]?\s*(.*)$/,
+			// 卷+章合写：「第一卷 成长之路 第001章 杜家私生子」整行以卷开头，
+			// 必须独立写一条正则；只保留最后一个捕获组「杜家私生子」作章节标题。
+			// `[：:\-]?\s*` 与上面的「第N章」正则对齐，否则 `第001章：标题` 会被捕获成「：标题」。
+			/^第[零一二三四五六七八九十百千万两\d]+卷\s+.+?\s+第[零一二三四五六七八九十百千万亿两\d]+章\s*[：:\-]?\s*(.*)$/,
 			/^[一二三四五六七八九十]+、\s*(.+)/,
 			/^[\d]+\.\s*(.+)/,
 			/^[\d]+[\s]*[、．.]\s*(.+)/,
