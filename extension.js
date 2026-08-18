@@ -6,6 +6,51 @@ const path = require('path');
 const pdf = require('pdf-parse');
 const EPub = require('epub2').EPub;
 
+// 状态栏一屏显示的字符数，同时也是一次翻页的跨度。
+// 状态栏可用宽度取决于窗口宽度和其他状态栏项，VSCode 没有 API 能查到，
+// 所以做成 lazyNovel.displayLength 配置项让用户按自己的窗口调。
+// 默认按中文取 40：汉字宽度约为英文的两倍，80 个汉字在多数窗口下会被截断。
+const DEFAULT_DISPLAY_LENGTH = 40;
+
+// 状态栏悬浮提示里固定的快捷键说明
+const READING_SHORTCUT_HINT = [
+	'Alt + S 开关阅读模式（2 向后 / 1 向前）',
+	'Shift + 空格 显示/隐藏',
+	'Ctrl + Alt + H 章节预览'
+].join('\n');
+
+/**
+ * 计算向后翻一页后的位置：本章滚到底就自动进入下一章
+ * @param {number[]} chapterLengths 每章正文的字符数
+ * @returns {{chapterIndex: number, scrollOffset: number}|null} null 表示已在全书末尾
+ */
+function nextPagePosition(chapterIndex, scrollOffset, chapterLengths, jumpSize = DEFAULT_DISPLAY_LENGTH) {
+	const maxOffset = Math.max(0, chapterLengths[chapterIndex] - 1);
+
+	if (scrollOffset < maxOffset) {
+		return { chapterIndex, scrollOffset: Math.min(maxOffset, scrollOffset + jumpSize) };
+	}
+	if (chapterIndex < chapterLengths.length - 1) {
+		return { chapterIndex: chapterIndex + 1, scrollOffset: 0 };
+	}
+	return null;
+}
+
+/**
+ * 计算向前翻一页后的位置：本章退到开头就回到上一章末尾
+ * @returns {{chapterIndex: number, scrollOffset: number}|null} null 表示已在全书开头
+ */
+function previousPagePosition(chapterIndex, scrollOffset, chapterLengths, jumpSize = DEFAULT_DISPLAY_LENGTH) {
+	if (scrollOffset > 0) {
+		return { chapterIndex, scrollOffset: Math.max(0, scrollOffset - jumpSize) };
+	}
+	if (chapterIndex > 0) {
+		const previousIndex = chapterIndex - 1;
+		return { chapterIndex: previousIndex, scrollOffset: Math.max(0, chapterLengths[previousIndex] - 1) };
+	}
+	return null;
+}
+
 /**
  * Alt键状态管理器类 - 监听和管理Alt键状态
  */
@@ -1727,10 +1772,53 @@ class ThiefReaderWebviewProvider {
 		this._floatingWindowManager = new FloatingWindowManager(context, this, this._scrollHandler); // 悬浮窗管理器
 		this._mouseEventListener = new MouseEventListener(this._altKeyManager, this._floatingWindowManager, this, this._scrollHandler); // 鼠标事件监听器（保留用于兼容性）
 		
+		// 阅读模式：开启后数字键 2/1 翻页，默认关闭以免抢占正常输入
+		this._readingModeEnabled = false;
+
 		this._loadOpacity(); // 从配置中加载透明度
+		this._loadDisplayLength(); // 从配置中加载一屏显示字符数
 		this._initStatusBar();
+		this._registerReadingMode();
+		this._watchDisplayLength();
 		// 移除旧的悬停功能初始化，新功能直接集成到状态栏按钮中
 		this._restoreData(); // 恢复数据
+	}
+
+	/**
+	 * 注册阅读模式：Alt + S 开关，开启后数字键 2/1 向后/向前翻页
+	 *
+	 * ponytail: 裸数字键会抢占正常输入，所以用 context key 门控，
+	 * package.json 里的 keybinding 靠 when: lazyNovel.readingMode 生效。
+	 */
+	_registerReadingMode() {
+		const toggleCommand = vscode.commands.registerCommand('lazyNovel.toggleReadingMode', () => {
+			this._readingModeEnabled = !this._readingModeEnabled;
+			vscode.commands.executeCommand('setContext', 'lazyNovel.readingMode', this._readingModeEnabled);
+			vscode.window.setStatusBarMessage(
+				this._readingModeEnabled ? '阅读模式已开启：2 向后翻页 / 1 向前翻页' : '阅读模式已关闭',
+				2000
+			);
+		});
+
+		this._context.subscriptions.push(toggleCommand);
+	}
+
+	/**
+	 * 监听显示字符数配置变化，改完立即重绘，省得让用户重启窗口试宽度
+	 */
+	_watchDisplayLength() {
+		const watcher = vscode.workspace.onDidChangeConfiguration((event) => {
+			if (!event.affectsConfiguration('lazyNovel.displayLength')) {
+				return;
+			}
+
+			this._loadDisplayLength();
+			if (this._currentChapter !== null && this._currentFile && this._currentFile.chapters) {
+				this._displayChapterText(this._currentFile.chapters[this._currentChapter]);
+			}
+		});
+
+		this._context.subscriptions.push(watcher);
 	}
 
 	/**
@@ -1739,8 +1827,8 @@ class ThiefReaderWebviewProvider {
 	_initStatusBar() {
 		this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 		this._statusBarItem.text = "reader: 准备就绪 📖";
-		this._statusBarItem.tooltip = '点击显示/隐藏章节预览 • 使用 Alt + 方向键滚动文字';
-		this._statusBarItem.command = 'lazyNovel.toggleChapterPreview'; // 设置点击命令
+		this._statusBarItem.tooltip = READING_SHORTCUT_HINT;
+		// 不绑定 command：点击状态栏不再触发章节预览
 		this._statusBarItem.show();
 		this._context.subscriptions.push(this._statusBarItem);
 	}
@@ -3310,8 +3398,8 @@ class ThiefReaderWebviewProvider {
 		const fullContent = chapter.content.join(' ');
 		const totalLength = fullContent.length;
 		
-		// 固定显示长度
-		const displayLength = 80;
+		// 一屏显示长度（可通过 lazyNovel.displayLength 调整）
+		const displayLength = this._displayLength;
 		
 		// 计算最大偏移量：允许滑动到最后一个字符
 		// 让最后一个字符可以显示在窗口的开始位置
@@ -3325,23 +3413,38 @@ class ThiefReaderWebviewProvider {
 		const actualEndPos = Math.min(this._scrollOffset + displayLength, totalLength);
 		const displayContent = fullContent.substring(this._scrollOffset, actualEndPos);
 		
-		// 滚动指示器：显示当前位置和总长度
-		const scrollIndicator = totalLength > displayLength 
-			? ` [${this._scrollOffset}-${actualEndPos}/${totalLength}]` 
-			: '';
-		
 		// 应用透明度到文本颜色
 		// 基础颜色：rgba(135,135,135,1)，根据透明度设置调整alpha值
 		const alpha = (this._opacity / 100).toFixed(2);
 		this._statusBarItem.color = `rgba(135, 135, 135, ${alpha})`;
 
-		// 检查预览窗口是否显示
-		const previewStatus = this._floatingWindowManager.isVisible() ? '🔍' : '📖';
-		
-		// 更新状态栏文本和图标
-		this._statusBarItem.text = `reader: ${chapter.title}${scrollIndicator} - ${displayContent} ${previewStatus}`;
-		
-		console.log(`状态栏已更新: ${chapter.title} 偏移量${this._scrollOffset} 预览状态${previewStatus}`);
+		// 状态栏只显示正文本身，书名/章节/进度/预览状态全部挪到悬浮提示里
+		this._statusBarItem.text = displayContent;
+		this._statusBarItem.tooltip = this._buildTooltip(chapter, totalLength, actualEndPos);
+
+		console.log(`状态栏已更新: ${chapter.title} 偏移量${this._scrollOffset}`);
+	}
+
+	/**
+	 * 组装状态栏悬浮提示：章节名、阅读进度和快捷键
+	 */
+	_buildTooltip(chapter, totalLength, actualEndPos) {
+		const percent = totalLength > 0
+			? Math.round((actualEndPos / totalLength) * 100)
+			: 100;
+		const lines = [];
+
+		if (this._currentFile) {
+			lines.push(`《${this._currentFile.name}》`);
+		}
+		lines.push(`章节：${chapter.title}`);
+		lines.push(`进度：${this._scrollOffset}-${actualEndPos} / ${totalLength} 字（${percent}%）`);
+		if (this._floatingWindowManager.isVisible()) {
+			lines.push('章节预览：已打开');
+		}
+		lines.push('', READING_SHORTCUT_HINT);
+
+		return lines.join('\n');
 	}
 
 	/**
@@ -3407,41 +3510,57 @@ class ThiefReaderWebviewProvider {
 	}
 
 	/**
-	 * 上一页 (Alt + Shift + 左方向键) - 快速向前跳转80个字符
+	 * 上一页 (数字键 1) - 向前一屏，退到章首则回到上一章末尾
 	 */
 	_previousPage() {
-		if (this._currentChapter !== null && this._currentFile) {
-			const jumpSize = 80; // 跳转一个显示窗口的大小
-			
-			if (this._scrollOffset > 0) {
-				this._scrollOffset = Math.max(0, this._scrollOffset - jumpSize);
-				const chapter = this._currentFile.chapters[this._currentChapter];
-				this._displayChapterText(chapter);
-				// 保存当前章节位置
-				this._saveChapterPosition(this._currentChapter, this._scrollOffset);
-				this._saveCurrentState();
-			}
-		}
+		this._turnPage(previousPagePosition, '已在全书开头');
 	}
 
 	/**
-	 * 下一页 (Alt + Shift + 右方向键) - 快速向后跳转80个字符
+	 * 下一页 (数字键 2) - 向后一屏，滚到章末则进入下一章
 	 */
 	_nextPage() {
-		if (this._currentChapter !== null && this._currentFile) {
-			const chapter = this._currentFile.chapters[this._currentChapter];
-			const fullContent = chapter.content.join(' ');
-			const jumpSize = 80; // 跳转一个显示窗口的大小
-			const maxScrollOffset = Math.max(0, fullContent.length - 1);
-			
-			if (this._scrollOffset < maxScrollOffset) {
-				this._scrollOffset = Math.min(maxScrollOffset, this._scrollOffset + jumpSize);
-				this._displayChapterText(chapter);
-				// 保存当前章节位置
-				this._saveChapterPosition(this._currentChapter, this._scrollOffset);
-				this._saveCurrentState();
-			}
+		this._turnPage(nextPagePosition, '已读到全书末尾');
+	}
+
+	/**
+	 * 翻页公共逻辑：算出新位置并落到状态栏
+	 *
+	 * 短章节（比如开头那行书籍简介）滚到底后必须能跨到下一章，
+	 * 否则阅读会卡死在几十个字符里，看起来像是快捷键没反应。
+	 */
+	_turnPage(computePosition, boundaryMessage) {
+		if (this._currentChapter === null || !this._currentFile || !this._currentFile.chapters) {
+			return;
 		}
+
+		const chapters = this._currentFile.chapters;
+		const chapterLengths = chapters.map(chapter => chapter.content.join(' ').length);
+		// 翻页跨度跟显示长度保持一致，否则会漏字或重复
+		const position = computePosition(
+			this._currentChapter,
+			this._scrollOffset,
+			chapterLengths,
+			this._displayLength
+		);
+
+		if (!position) {
+			vscode.window.setStatusBarMessage(boundaryMessage, 1500);
+			return;
+		}
+
+		// 跨章时先存好原章节的位置，再切换
+		if (position.chapterIndex !== this._currentChapter) {
+			this._saveChapterPosition(this._currentChapter, this._scrollOffset);
+			this._currentChapter = position.chapterIndex;
+			this._currentPage = 0;
+			this._updateChapterHighlight(position.chapterIndex);
+		}
+
+		this._scrollOffset = position.scrollOffset;
+		this._displayChapterText(chapters[this._currentChapter]);
+		this._saveChapterPosition(this._currentChapter, this._scrollOffset);
+		this._saveCurrentState();
 	}
 
 	/**
@@ -3539,6 +3658,16 @@ class ThiefReaderWebviewProvider {
 	}
 
 	/**
+	 * 从配置中加载状态栏一屏显示的字符数
+	 */
+	_loadDisplayLength() {
+		const savedLength = vscode.workspace.getConfiguration('lazyNovel').get('displayLength');
+		this._displayLength = Number.isFinite(savedLength) && savedLength > 0
+			? savedLength
+			: DEFAULT_DISPLAY_LENGTH;
+	}
+
+	/**
 	 * 刷新视图
 	 */
 	_refreshView() {
@@ -3603,5 +3732,8 @@ function deactivate() {}
 
 module.exports = {
 	activate,
-	deactivate
+	deactivate,
+	nextPagePosition,
+	previousPagePosition,
+	DEFAULT_DISPLAY_LENGTH
 }

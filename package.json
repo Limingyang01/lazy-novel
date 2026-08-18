@@ -61,6 +61,11 @@
         "category": "Lazy Novel"
       },
       {
+        "command": "lazyNovel.toggleReadingMode",
+        "title": "Lazy Novel: 开关阅读模式（数字键翻页）",
+        "category": "Lazy Novel"
+      },
+      {
         "command": "lazyNovel.showHoverPreview",
         "title": "Lazy Novel: 显示悬停预览",
         "category": "Lazy Novel"
@@ -72,10 +77,9 @@
       }
     ],
     "keybindings": [
-      { "command": "lazyNovel.previousPage", "key": "alt+shift+left" },
-      { "command": "lazyNovel.nextPage", "key": "alt+shift+right" },
-      { "command": "lazyNovel.scrollLeft", "key": "alt+left" },
-      { "command": "lazyNovel.scrollRight", "key": "alt+right" },
+      { "command": "lazyNovel.toggleReadingMode", "key": "alt+s" },
+      { "command": "lazyNovel.nextPage", "key": "2", "when": "lazyNovel.readingMode && !terminalFocus" },
+      { "command": "lazyNovel.previousPage", "key": "1", "when": "lazyNovel.readingMode && !terminalFocus" },
       { "command": "lazyNovel.toggleVisibility", "key": "shift+space" },
       { "command": "lazyNovel.showHoverPreview", "key": "ctrl+alt+h" },
       { "command": "lazyNovel.hideHoverPreview", "key": "ctrl+alt+shift+h" }
@@ -107,6 +111,20 @@
           "minimum": 5,
           "maximum": 100,
           "description": "状态栏文字区域的透明度 (5-100)"
+        },
+        "lazyNovel.popupTextOpacity": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 100,
+          "description": "章节预览弹窗文字的透明度 (10-100)"
+        },
+        "lazyNovel.displayLength": {
+          "type": "number",
+          "default": 40,
+          "minimum": 10,
+          "maximum": 200,
+          "description": "状态栏一屏显示的字符数，同时也是一次翻页的跨度。文字被右侧截断时调小；窗口很宽、想一屏多看几句时调大。中文约为英文的两倍宽，读中文建议 30-50"
         }
       }
     }

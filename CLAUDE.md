@@ -40,9 +40,17 @@
 - 透明度调节
 
 ### 快捷操作
-- `Alt + 左/右方向键`：逐字滑动（10字符）
-- `Alt + Shift + 左/右`：快速翻页（80字符）
+- `Alt + S`：开关阅读模式
+- 阅读模式下 `2` 向后翻页 / `1` 向前翻页（一屏，自动跨章）
+- 一屏字符数由 `lazyNovel.displayLength` 控制（默认 40），翻页跨度与它保持一致
 - `Shift + 空格`：显示/隐藏内容
+- `Ctrl + Alt + H`：章节预览弹窗（点击状态栏不再触发预览）
+
+翻页的两个实现约束：
+1. 裸数字键会抢占正常输入，所以用 context key `lazyNovel.readingMode` 门控 keybinding，
+   由 `_registerReadingMode()` 通过 `setContext` 切换。
+2. 翻页必须能跨章，否则会卡死在短章节（如开头的书籍简介行）里。位置计算在
+   `nextPagePosition()` / `previousPagePosition()` 纯函数中，测试见 `test/paging.test.js`。
 
 ## 技术依赖
 
