@@ -8,3 +8,13 @@ vsc-extension-quickstart.md
 **/*.map
 **/eslint.config.mjs
 **/.vscode-test.*
+
+# 开发用文件，不该随插件发布给用户
+.superpowers/**
+docs/**
+CLAUDE.md
+*.vsix
+
+# pdf-parse 自带的测试 PDF 样本占 4.8MB，只在它被直接运行（!module.parent）时才读，
+# 作为依赖 require 时用不到
+node_modules/pdf-parse/test/**
