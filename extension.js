@@ -1,23 +1,35 @@
 // 'vscode' 模块包含 VS Code 扩展性 API
 // 导入模块并在下面的代码中使用别名 vscode 引用它
-const vscode = require('vscode');
-const fs = require('fs');
-const path = require('path');
-const pdf = require('pdf-parse');
-const EPub = require('epub2').EPub;
+const vscode = require('vscode')
+const fs = require('fs')
+const path = require('path')
+const pdf = require('pdf-parse')
+const EPub = require('epub2').EPub
 
 // 状态栏一屏显示的字符数，同时也是一次翻页的跨度。
 // 状态栏可用宽度取决于窗口宽度和其他状态栏项，VSCode 没有 API 能查到，
 // 所以做成 lazyNovel.displayLength 配置项让用户按自己的窗口调。
 // 默认按中文取 40：汉字宽度约为英文的两倍，80 个汉字在多数窗口下会被截断。
-const DEFAULT_DISPLAY_LENGTH = 40;
+const DEFAULT_DISPLAY_LENGTH = 40
+
+// globalState 存储键。统一到 lazy-novel.* 前缀，
+// 旧键 thief-reader.* 只用于一次性迁移：读到就搬到新键并清掉，
+// 否则老用户升级后书库会凭空消失。
+const STORAGE_KEYS = {
+	files: 'lazy-novel.files',
+	readingState: 'lazy-novel.readingState'
+}
+const LEGACY_STORAGE_KEYS = {
+	files: 'thief-reader.files',
+	readingState: 'thief-reader.readingState'
+}
 
 // 状态栏悬浮提示里固定的快捷键说明
 const READING_SHORTCUT_HINT = [
 	'Alt + S 开关阅读模式（2 向后 / 1 向前）',
 	'Shift + 空格 显示/隐藏',
 	'Ctrl + Alt + H 章节预览'
-].join('\n');
+].join('\n')
 
 /**
  * 计算向后翻一页后的位置：本章滚到底就自动进入下一章
@@ -25,15 +37,15 @@ const READING_SHORTCUT_HINT = [
  * @returns {{chapterIndex: number, scrollOffset: number}|null} null 表示已在全书末尾
  */
 function nextPagePosition(chapterIndex, scrollOffset, chapterLengths, jumpSize = DEFAULT_DISPLAY_LENGTH) {
-	const maxOffset = Math.max(0, chapterLengths[chapterIndex] - 1);
+	const maxOffset = Math.max(0, chapterLengths[chapterIndex] - 1)
 
 	if (scrollOffset < maxOffset) {
-		return { chapterIndex, scrollOffset: Math.min(maxOffset, scrollOffset + jumpSize) };
+		return { chapterIndex, scrollOffset: Math.min(maxOffset, scrollOffset + jumpSize) }
 	}
 	if (chapterIndex < chapterLengths.length - 1) {
-		return { chapterIndex: chapterIndex + 1, scrollOffset: 0 };
+		return { chapterIndex: chapterIndex + 1, scrollOffset: 0 }
 	}
-	return null;
+	return null
 }
 
 /**
@@ -42,13 +54,13 @@ function nextPagePosition(chapterIndex, scrollOffset, chapterLengths, jumpSize =
  */
 function previousPagePosition(chapterIndex, scrollOffset, chapterLengths, jumpSize = DEFAULT_DISPLAY_LENGTH) {
 	if (scrollOffset > 0) {
-		return { chapterIndex, scrollOffset: Math.max(0, scrollOffset - jumpSize) };
+		return { chapterIndex, scrollOffset: Math.max(0, scrollOffset - jumpSize) }
 	}
 	if (chapterIndex > 0) {
-		const previousIndex = chapterIndex - 1;
-		return { chapterIndex: previousIndex, scrollOffset: Math.max(0, chapterLengths[previousIndex] - 1) };
+		const previousIndex = chapterIndex - 1
+		return { chapterIndex: previousIndex, scrollOffset: Math.max(0, chapterLengths[previousIndex] - 1) }
 	}
-	return null;
+	return null
 }
 
 /**
@@ -56,10 +68,10 @@ function previousPagePosition(chapterIndex, scrollOffset, chapterLengths, jumpSi
  */
 class AltKeyManager {
 	constructor() {
-		this._isAltPressed = false;
-		this._listeners = [];
-		this._disposables = [];
-		this._forceEnabled = false; // 强制启用悬停功能（绕过Alt键检测）
+		this._isAltPressed = false
+		this._listeners = []
+		this._disposables = []
+		this._forceEnabled = false // 强制启用悬停功能（绕过Alt键检测）
 	}
 
 	/**
@@ -68,26 +80,26 @@ class AltKeyManager {
 	startListening() {
 		// 由于VSCode API限制，我们使用编辑器选择变化来模拟键盘事件监听
 		// 这里我们会在后续通过其他方式来检测Alt键状态
-		console.log('Alt键监听已启动');
+		console.log('Alt键监听已启动')
 	}
 
 	/**
 	 * 检查Alt键是否按下
 	 */
 	isAltPressed() {
-		return this._isAltPressed;
+		return this._isAltPressed
 	}
 
 	/**
 	 * 设置Alt键状态（通过其他方式触发）
 	 */
 	setAltPressed(pressed) {
-		const wasPressed = this._isAltPressed;
-		this._isAltPressed = pressed;
-		
+		const wasPressed = this._isAltPressed
+		this._isAltPressed = pressed
+
 		// 通知监听器
 		if (wasPressed !== pressed) {
-			this._notifyListeners(pressed);
+			this._notifyListeners(pressed)
 		}
 	}
 
@@ -95,40 +107,40 @@ class AltKeyManager {
 	 * 强制启用/禁用悬停功能（绕过Alt键检测限制）
 	 */
 	setForceEnabled(enabled) {
-		this._forceEnabled = enabled;
-		console.log(`悬停功能强制${enabled ? '启用' : '禁用'}`);
+		this._forceEnabled = enabled
+		console.log(`悬停功能强制${enabled ? '启用' : '禁用'}`)
 	}
 
 	/**
 	 * 获取强制启用状态
 	 */
 	isForceEnabled() {
-		return this._forceEnabled;
+		return this._forceEnabled
 	}
 
 	/**
 	 * 切换强制启用状态
 	 */
 	toggleForceEnabled() {
-		this._forceEnabled = !this._forceEnabled;
-		console.log(`悬停功能强制${this._forceEnabled ? '启用' : '禁用'}`);
-		return this._forceEnabled;
+		this._forceEnabled = !this._forceEnabled
+		console.log(`悬停功能强制${this._forceEnabled ? '启用' : '禁用'}`)
+		return this._forceEnabled
 	}
 
 	/**
 	 * 添加状态变化监听器
 	 */
 	addListener(listener) {
-		this._listeners.push(listener);
+		this._listeners.push(listener)
 	}
 
 	/**
 	 * 移除监听器
 	 */
 	removeListener(listener) {
-		const index = this._listeners.indexOf(listener);
+		const index = this._listeners.indexOf(listener)
 		if (index > -1) {
-			this._listeners.splice(index, 1);
+			this._listeners.splice(index, 1)
 		}
 	}
 
@@ -136,22 +148,22 @@ class AltKeyManager {
 	 * 通知所有监听器
 	 */
 	_notifyListeners(isPressed) {
-		this._listeners.forEach(listener => {
+		this._listeners.forEach((listener) => {
 			try {
-				listener(isPressed);
+				listener(isPressed)
 			} catch (error) {
-				console.error('Alt键状态监听器执行错误:', error);
+				console.error('Alt键状态监听器执行错误:', error)
 			}
-		});
+		})
 	}
 
 	/**
 	 * 清理资源
 	 */
 	dispose() {
-		this._disposables.forEach(disposable => disposable.dispose());
-		this._disposables = [];
-		this._listeners = [];
+		this._disposables.forEach((disposable) => disposable.dispose())
+		this._disposables = []
+		this._listeners = []
 	}
 }
 
@@ -160,11 +172,11 @@ class AltKeyManager {
  */
 class ScrollWheelHandler {
 	constructor(readerProvider) {
-		this._readerProvider = readerProvider;
-		this._scrollStep = 50; // 每次滚动的字符数
-		this._scrollPosition = 0; // 悬浮窗独立的滚动位置
-		this._maxScrollPosition = 0;
-		this._isInitialized = false;
+		this._readerProvider = readerProvider
+		this._scrollStep = 50 // 每次滚动的字符数
+		this._scrollPosition = 0 // 悬浮窗独立的滚动位置
+		this._maxScrollPosition = 0
+		this._isInitialized = false
 	}
 
 	/**
@@ -172,9 +184,9 @@ class ScrollWheelHandler {
 	 */
 	initialize() {
 		if (this._readerProvider._currentFile && this._readerProvider._currentChapter !== null) {
-			this._scrollPosition = this._readerProvider._scrollOffset;
-			this._maxScrollPosition = this._getCurrentChapterLength();
-			this._isInitialized = true;
+			this._scrollPosition = this._readerProvider._scrollOffset
+			this._maxScrollPosition = this._getCurrentChapterLength()
+			this._isInitialized = true
 		}
 	}
 
@@ -183,71 +195,71 @@ class ScrollWheelHandler {
 	 */
 	handleWheelEvent(deltaY, ctrlKey = false) {
 		if (!this._readerProvider._currentFile || this._readerProvider._currentChapter === null) {
-			return null;
+			return null
 		}
 
 		if (!this._isInitialized) {
-			this.initialize();
+			this.initialize()
 		}
 
 		// 计算滚动步长
-		const step = ctrlKey ? this._scrollStep * 2 : this._scrollStep;
-		const direction = Math.sign(deltaY);
-		
+		const step = ctrlKey ? this._scrollStep * 2 : this._scrollStep
+		const direction = Math.sign(deltaY)
+
 		// 计算新的滚动位置
-		const newPosition = Math.max(0, this._scrollPosition + (direction * step));
-		const maxPosition = Math.max(0, this._maxScrollPosition - 200); // 保留一些缓冲
-		
-		this._scrollPosition = Math.min(newPosition, maxPosition);
-		
+		const newPosition = Math.max(0, this._scrollPosition + direction * step)
+		const maxPosition = Math.max(0, this._maxScrollPosition - 200) // 保留一些缓冲
+
+		this._scrollPosition = Math.min(newPosition, maxPosition)
+
 		// 生成新内容
-		return this._generateScrolledContent();
+		return this._generateScrolledContent()
 	}
 
 	/**
 	 * 获取当前章节长度
 	 */
 	_getCurrentChapterLength() {
-		const currentFile = this._readerProvider._currentFile;
+		const currentFile = this._readerProvider._currentFile
 		if (!currentFile || !currentFile.chapters || this._readerProvider._currentChapter === null) {
-			return 0;
+			return 0
 		}
-		
-		const chapter = currentFile.chapters[this._readerProvider._currentChapter];
-		if (!chapter) return 0;
-		
+
+		const chapter = currentFile.chapters[this._readerProvider._currentChapter]
+		if (!chapter) return 0
+
 		// 使用辅助函数处理内容
-		const fullContent = getChapterContentAsString(chapter);
-		return fullContent.length;
+		const fullContent = getChapterContentAsString(chapter)
+		return fullContent.length
 	}
 
 	/**
 	 * 生成滚动后的内容
 	 */
 	_generateScrolledContent() {
-		const currentFile = this._readerProvider._currentFile;
+		const currentFile = this._readerProvider._currentFile
 		if (!currentFile || !currentFile.chapters || this._readerProvider._currentChapter === null) {
-			return null;
+			return null
 		}
 
-		const chapter = currentFile.chapters[this._readerProvider._currentChapter];
-		if (!chapter) return null;
+		const chapter = currentFile.chapters[this._readerProvider._currentChapter]
+		if (!chapter) return null
 
 		// 获取显示的文字内容
-		const displayLength = 300; // 悬浮窗显示的字符数
-		
+		const displayLength = 300 // 悬浮窗显示的字符数
+
 		// 使用辅助函数处理内容
-		const fullContent = getChapterContentAsString(chapter);
+		const fullContent = getChapterContentAsString(chapter)
 		if (!fullContent) {
-			console.error('Empty or invalid chapter content');
-			return null;
+			console.error('Empty or invalid chapter content')
+			return null
 		}
-		
-		const text = fullContent.substring(this._scrollPosition, this._scrollPosition + displayLength);
-		
+
+		const text = fullContent.substring(this._scrollPosition, this._scrollPosition + displayLength)
+
 		// 生成位置信息
-		const position = `${this._scrollPosition}-${this._scrollPosition + text.length}/${fullContent.length}`;
-		
+		const position = `${this._scrollPosition}-${this._scrollPosition + text.length}/${fullContent.length}`
+
 		return {
 			text: text,
 			chapterTitle: chapter.title,
@@ -255,7 +267,7 @@ class ScrollWheelHandler {
 			scrollPosition: this._scrollPosition,
 			maxPosition: fullContent.length,
 			hasMore: this._scrollPosition + displayLength < fullContent.length
-		};
+		}
 	}
 
 	/**
@@ -264,15 +276,15 @@ class ScrollWheelHandler {
 	syncToStatusBar() {
 		if (this._readerProvider._currentFile && this._isInitialized) {
 			// 更新主阅读器的滚动位置
-			this._readerProvider._scrollOffset = this._scrollPosition;
-			
+			this._readerProvider._scrollOffset = this._scrollPosition
+
 			// 保存当前状态
-			this._readerProvider._saveCurrentState();
-			
+			this._readerProvider._saveCurrentState()
+
 			// 更新状态栏显示
-			this._readerProvider._displayChapterText();
-			
-			console.log(`滚动位置已同步到状态栏: ${this._scrollPosition}`);
+			this._readerProvider._displayChapterText()
+
+			console.log(`滚动位置已同步到状态栏: ${this._scrollPosition}`)
 		}
 	}
 
@@ -280,23 +292,23 @@ class ScrollWheelHandler {
 	 * 重置滚动位置
 	 */
 	reset() {
-		this._scrollPosition = 0;
-		this._maxScrollPosition = 0;
-		this._isInitialized = false;
+		this._scrollPosition = 0
+		this._maxScrollPosition = 0
+		this._isInitialized = false
 	}
 
 	/**
 	 * 获取当前滚动位置
 	 */
 	getCurrentPosition() {
-		return this._scrollPosition;
+		return this._scrollPosition
 	}
 
 	/**
 	 * 设置滚动步长
 	 */
 	setScrollStep(step) {
-		this._scrollStep = Math.max(10, Math.min(200, step)); // 限制在合理范围内
+		this._scrollStep = Math.max(10, Math.min(200, step)) // 限制在合理范围内
 	}
 }
 
@@ -305,16 +317,16 @@ class ScrollWheelHandler {
  */
 function getChapterContentAsString(chapter) {
 	if (!chapter || !chapter.content) {
-		return '';
+		return ''
 	}
 
 	if (Array.isArray(chapter.content)) {
-		return chapter.content.join('\n'); // 数组情况：用换行符连接
+		return chapter.content.join('\n') // 数组情况：用换行符连接
 	} else if (typeof chapter.content === 'string') {
-		return chapter.content; // 字符串情况：直接使用
+		return chapter.content // 字符串情况：直接使用
 	} else {
-		console.warn('Unexpected chapter.content type:', typeof chapter.content, chapter.content);
-		return String(chapter.content); // 强制转换为字符串
+		console.warn('Unexpected chapter.content type:', typeof chapter.content, chapter.content)
+		return String(chapter.content) // 强制转换为字符串
 	}
 }
 
@@ -323,19 +335,19 @@ function getChapterContentAsString(chapter) {
  */
 class FloatingWindowManager {
 	constructor(context, readerProvider, scrollHandler) {
-		this._context = context;
-		this._readerProvider = readerProvider;
-		this._scrollHandler = scrollHandler;
-		this._webviewPanel = null;
-		this._isVisible = false;
-		this._currentContent = null;
-		this._debounceTimer = null;
+		this._context = context
+		this._readerProvider = readerProvider
+		this._scrollHandler = scrollHandler
+		this._webviewPanel = null
+		this._isVisible = false
+		this._currentContent = null
+		this._debounceTimer = null
 		// 添加滚动位置记录
-		this._lastScrollTop = 0;
-		this._lastScrollPercentage = 0;
-		this._lastCharOffset = 0; // 添加字符偏移量记录
-		this._popupTextOpacity = 100; // 弹窗文字透明度，默认100%
-		this._loadPopupOpacity(); // 从配置中加载透明度
+		this._lastScrollTop = 0
+		this._lastScrollPercentage = 0
+		this._lastCharOffset = 0 // 添加字符偏移量记录
+		this._popupTextOpacity = 100 // 弹窗文字透明度，默认100%
+		this._loadPopupOpacity() // 从配置中加载透明度
 	}
 
 	/**
@@ -343,25 +355,25 @@ class FloatingWindowManager {
 	 */
 	async showChapterPreview() {
 		try {
-			const currentFile = this._readerProvider._currentFile;
+			const currentFile = this._readerProvider._currentFile
 			if (!currentFile || this._readerProvider._currentChapter === null) {
-				vscode.window.showWarningMessage('请先加载文件并选择章节');
-				return;
+				vscode.window.showWarningMessage('请先加载文件并选择章节')
+				return
 			}
 
-			const chapter = currentFile.chapters[this._readerProvider._currentChapter];
+			const chapter = currentFile.chapters[this._readerProvider._currentChapter]
 			if (!chapter) {
-				vscode.window.showWarningMessage('当前章节无效');
-				return;
+				vscode.window.showWarningMessage('当前章节无效')
+				return
 			}
 
 			// 获取完整章节内容
-			const fullContent = getChapterContentAsString(chapter);
-			const currentOffset = this._readerProvider._scrollOffset;
+			const fullContent = getChapterContentAsString(chapter)
+			const currentOffset = this._readerProvider._scrollOffset
 
 			// 初始化字符偏移量为当前状态栏的偏移量
-			this._lastCharOffset = currentOffset;
-			this._lastScrollPercentage = this._calculateScrollPercentage(currentOffset, fullContent);
+			this._lastCharOffset = currentOffset
+			this._lastScrollPercentage = this._calculateScrollPercentage(currentOffset, fullContent)
 
 			const previewData = {
 				chapterTitle: chapter.title,
@@ -369,12 +381,12 @@ class FloatingWindowManager {
 				currentOffset: currentOffset,
 				totalLength: fullContent.length,
 				initialScrollPercentage: this._lastScrollPercentage
-			};
+			}
 
 			// 如果悬浮窗已存在，直接更新内容
 			if (this._webviewPanel) {
-				this._updateChapterPreview(previewData);
-				return;
+				this._updateChapterPreview(previewData)
+				return
 			}
 
 			// 创建新的章节预览窗
@@ -390,28 +402,27 @@ class FloatingWindowManager {
 					retainContextWhenHidden: true,
 					localResourceRoots: []
 				}
-			);
+			)
 
 			// 设置WebView内容
-			this._webviewPanel.webview.html = this._generateChapterPreviewHtml();
-			
+			this._webviewPanel.webview.html = this._generateChapterPreviewHtml()
+
 			// 设置消息处理
-			this._setupChapterPreviewMessageHandling();
-			
+			this._setupChapterPreviewMessageHandling()
+
 			// 设置面板关闭事件
 			this._webviewPanel.onDidDispose(() => {
-				this._onChapterPreviewDisposed();
-			});
+				this._onChapterPreviewDisposed()
+			})
 
 			// 更新内容并滚动到当前位置
-			this._updateChapterPreview(previewData);
-			this._isVisible = true;
+			this._updateChapterPreview(previewData)
+			this._isVisible = true
 
-			console.log('章节预览窗已显示:', chapter.title);
-
+			console.log('章节预览窗已显示:', chapter.title)
 		} catch (error) {
-			console.error('显示章节预览窗失败:', error);
-			vscode.window.showErrorMessage('显示章节预览失败: ' + error.message);
+			console.error('显示章节预览窗失败:', error)
+			vscode.window.showErrorMessage('显示章节预览失败: ' + error.message)
 		}
 	}
 
@@ -420,7 +431,7 @@ class FloatingWindowManager {
 	 */
 	async showAt(content) {
 		// 重定向到新的章节预览方法
-		return this.showChapterPreview();
+		return this.showChapterPreview()
 	}
 
 	/**
@@ -429,15 +440,15 @@ class FloatingWindowManager {
 	hide() {
 		if (this._webviewPanel) {
 			// 使用最后记录的滚动位置进行同步（避免向disposed WebView发送消息）
-			this._syncLastScrollPositionToStatusBar();
-			
-			// 关闭面板
-			this._webviewPanel.dispose();
-			this._webviewPanel = null;
-			this._isVisible = false;
-			this._currentContent = null;
+			this._syncLastScrollPositionToStatusBar()
 
-			console.log('章节预览窗已隐藏');
+			// 关闭面板
+			this._webviewPanel.dispose()
+			this._webviewPanel = null
+			this._isVisible = false
+			this._currentContent = null
+
+			console.log('章节预览窗已隐藏')
 		}
 	}
 
@@ -446,9 +457,9 @@ class FloatingWindowManager {
 	 */
 	toggleChapterPreview() {
 		if (this._isVisible) {
-			this.hide();
+			this.hide()
 		} else {
-			this.showChapterPreview();
+			this.showChapterPreview()
 		}
 	}
 
@@ -457,9 +468,9 @@ class FloatingWindowManager {
 	 */
 	_calculateScrollPercentage(currentOffset, fullContent) {
 		if (!fullContent || fullContent.length === 0) {
-			return 0;
+			return 0
 		}
-		return Math.min(currentOffset / fullContent.length, 1);
+		return Math.min(currentOffset / fullContent.length, 1)
 	}
 
 	/**
@@ -467,12 +478,12 @@ class FloatingWindowManager {
 	 */
 	_updateChapterPreview(previewData) {
 		if (!this._webviewPanel || !previewData) {
-			return;
+			return
 		}
 
 		// 防抖更新
 		if (this._debounceTimer) {
-			clearTimeout(this._debounceTimer);
+			clearTimeout(this._debounceTimer)
 		}
 
 		this._debounceTimer = setTimeout(() => {
@@ -481,15 +492,15 @@ class FloatingWindowManager {
 				type: 'updateChapterPreview',
 				data: previewData,
 				popupTextOpacity: this._popupTextOpacity
-			});
-		}, 50); // 50ms防抖
+			})
+		}, 50) // 50ms防抖
 	}
 
 	/**
 	 * 同步滚动位置到状态栏（安全版本，检查WebView状态）
 	 */
 	async _syncScrollPositionToStatusBar() {
-		if (!this._webviewPanel || !this._isVisible) return;
+		if (!this._webviewPanel || !this._isVisible) return
 
 		try {
 			// 检查WebView是否还有效
@@ -497,15 +508,15 @@ class FloatingWindowManager {
 				// 请求WebView返回当前滚动位置
 				this._webviewPanel.webview.postMessage({
 					type: 'requestScrollPosition'
-				});
+				})
 			} else {
 				// WebView无效，使用最后记录的位置
-				this._syncLastScrollPositionToStatusBar();
+				this._syncLastScrollPositionToStatusBar()
 			}
 		} catch (error) {
-			console.warn('同步滚动位置失败，使用备用方案:', error.message);
+			console.warn('同步滚动位置失败，使用备用方案:', error.message)
 			// 发生错误时使用最后记录的滚动位置
-			this._syncLastScrollPositionToStatusBar();
+			this._syncLastScrollPositionToStatusBar()
 		}
 	}
 
@@ -514,46 +525,46 @@ class FloatingWindowManager {
 	 */
 	_syncLastScrollPositionToStatusBar() {
 		try {
-			const currentFile = this._readerProvider._currentFile;
-			if (!currentFile || this._readerProvider._currentChapter === null) return;
+			const currentFile = this._readerProvider._currentFile
+			if (!currentFile || this._readerProvider._currentChapter === null) return
 
-			const chapter = currentFile.chapters[this._readerProvider._currentChapter];
-			if (!chapter) return;
+			const chapter = currentFile.chapters[this._readerProvider._currentChapter]
+			if (!chapter) return
 
-			const fullContent = getChapterContentAsString(chapter);
-			
+			const fullContent = getChapterContentAsString(chapter)
+
 			// 优先使用字符偏移量，如果没有则使用百分比计算
-			let newTextOffset = this._lastCharOffset;
-			
+			let newTextOffset = this._lastCharOffset
+
 			// 如果字符偏移量为0但百分比不为0，说明可能是旧版本数据，使用百分比计算
 			if (newTextOffset === 0 && this._lastScrollPercentage > 0) {
-				newTextOffset = Math.floor(this._lastScrollPercentage * fullContent.length);
-				console.log(`使用百分比计算偏移量: ${this._lastScrollPercentage.toFixed(4)} -> ${newTextOffset}`);
+				newTextOffset = Math.floor(this._lastScrollPercentage * fullContent.length)
+				console.log(`使用百分比计算偏移量: ${this._lastScrollPercentage.toFixed(4)} -> ${newTextOffset}`)
 			} else {
-				console.log(`使用字符偏移量: ${newTextOffset}`);
+				console.log(`使用字符偏移量: ${newTextOffset}`)
 			}
-			
+
 			// 确保偏移量在有效范围内
-			newTextOffset = Math.max(0, Math.min(newTextOffset, fullContent.length - 1));
-			
+			newTextOffset = Math.max(0, Math.min(newTextOffset, fullContent.length - 1))
+
 			// 更新状态栏位置
-			this._readerProvider._scrollOffset = newTextOffset;
-			
+			this._readerProvider._scrollOffset = newTextOffset
+
 			// 立即更新状态栏显示（传入章节参数）
-			this._readerProvider._displayChapterText(chapter);
-			
+			this._readerProvider._displayChapterText(chapter)
+
 			// 保存当前状态（包括章节位置）
-			this._readerProvider._saveChapterPosition(this._readerProvider._currentChapter, newTextOffset);
-			this._readerProvider._saveCurrentState();
-			
+			this._readerProvider._saveChapterPosition(this._readerProvider._currentChapter, newTextOffset)
+			this._readerProvider._saveCurrentState()
+
 			// 强制刷新状态栏显示（确保图标同步）
 			setTimeout(() => {
-				this._readerProvider._displayChapterText(chapter);
-			}, 50);
-			
-			console.log(`✅ 弹窗滚动位置已同步到状态栏: 字符偏移量 ${newTextOffset}`);
+				this._readerProvider._displayChapterText(chapter)
+			}, 50)
+
+			console.log(`✅ 弹窗滚动位置已同步到状态栏: 字符偏移量 ${newTextOffset}`)
 		} catch (error) {
-			console.error('同步滚动位置失败:', error);
+			console.error('同步滚动位置失败:', error)
 		}
 	}
 
@@ -561,17 +572,17 @@ class FloatingWindowManager {
 	 * 检查悬浮窗是否可见
 	 */
 	isVisible() {
-		return this._isVisible && this._webviewPanel !== null;
+		return this._isVisible && this._webviewPanel !== null
 	}
 
 	/**
 	 * 从配置中加载弹窗文字透明度
 	 */
 	_loadPopupOpacity() {
-		const config = vscode.workspace.getConfiguration('lazyNovel');
-		const savedOpacity = config.get('popupTextOpacity');
+		const config = vscode.workspace.getConfiguration('lazyNovel')
+		const savedOpacity = config.get('popupTextOpacity')
 		if (savedOpacity !== undefined) {
-			this._popupTextOpacity = savedOpacity;
+			this._popupTextOpacity = savedOpacity
 		}
 	}
 
@@ -579,8 +590,8 @@ class FloatingWindowManager {
 	 * 保存弹窗文字透明度到配置
 	 */
 	_savePopupOpacity(value) {
-		this._popupTextOpacity = Math.max(10, Math.min(100, value));
-		vscode.workspace.getConfiguration('lazyNovel').update('popupTextOpacity', this._popupTextOpacity, true);
+		this._popupTextOpacity = Math.max(10, Math.min(100, value))
+		vscode.workspace.getConfiguration('lazyNovel').update('popupTextOpacity', this._popupTextOpacity, true)
 	}
 
 	/**
@@ -588,61 +599,61 @@ class FloatingWindowManager {
 	 */
 	_updateContent(content) {
 		if (!this._webviewPanel || !content) {
-			return;
+			return
 		}
 
 		// 防抖更新
 		if (this._debounceTimer) {
-			clearTimeout(this._debounceTimer);
+			clearTimeout(this._debounceTimer)
 		}
 
 		this._debounceTimer = setTimeout(() => {
-			this._currentContent = content;
-			
+			this._currentContent = content
+
 			// 发送内容更新消息
 			this._webviewPanel.webview.postMessage({
 				type: 'updateContent',
 				data: content
-			});
-		}, 50); // 50ms防抖
+			})
+		}, 50) // 50ms防抖
 	}
 
 	/**
 	 * 设置章节预览消息处理
 	 */
 	_setupChapterPreviewMessageHandling() {
-		this._webviewPanel.webview.onDidReceiveMessage(message => {
+		this._webviewPanel.webview.onDidReceiveMessage((message) => {
 			switch (message.type) {
 				case 'scrollPositionChanged':
-					this._handleScrollPositionChanged(message.scrollTop, message.scrollPercentage, message.charOffset);
-					break;
-				
+					this._handleScrollPositionChanged(message.scrollTop, message.scrollPercentage, message.charOffset)
+					break
+
 				case 'popupOpacityChanged':
-					this._savePopupOpacity(message.value);
-					break;
-				
+					this._savePopupOpacity(message.value)
+					break
+
 				case 'hide':
-					this.hide();
-					break;
-				
+					this.hide()
+					break
+
 				case 'ready':
 					// WebView准备就绪
-					console.log('章节预览WebView已准备就绪');
-					break;
+					console.log('章节预览WebView已准备就绪')
+					break
 
 				case 'scrollPositionResponse':
 					// 处理滚动位置响应
-					this._handleScrollPositionResponse(message.scrollTop, message.scrollPercentage, message.charOffset);
-					break;
+					this._handleScrollPositionResponse(message.scrollTop, message.scrollPercentage, message.charOffset)
+					break
 			}
-		});
+		})
 	}
 
 	/**
 	 * 设置消息处理（保留旧方法用于兼容）
 	 */
 	_setupMessageHandling() {
-		return this._setupChapterPreviewMessageHandling();
+		return this._setupChapterPreviewMessageHandling()
 	}
 
 	/**
@@ -650,9 +661,9 @@ class FloatingWindowManager {
 	 */
 	_handleScrollPositionChanged(scrollTop, scrollPercentage, charOffset) {
 		// 实时更新但不立即同步到状态栏（避免频繁更新）
-		this._lastScrollTop = scrollTop;
-		this._lastScrollPercentage = scrollPercentage;
-		this._lastCharOffset = charOffset || 0;
+		this._lastScrollTop = scrollTop
+		this._lastScrollPercentage = scrollPercentage
+		this._lastCharOffset = charOffset || 0
 	}
 
 	/**
@@ -660,32 +671,32 @@ class FloatingWindowManager {
 	 */
 	_handleScrollPositionResponse(scrollTop, scrollPercentage, charOffset) {
 		try {
-			const currentFile = this._readerProvider._currentFile;
-			if (!currentFile || this._readerProvider._currentChapter === null) return;
+			const currentFile = this._readerProvider._currentFile
+			if (!currentFile || this._readerProvider._currentChapter === null) return
 
-			const chapter = currentFile.chapters[this._readerProvider._currentChapter];
-			if (!chapter) return;
+			const chapter = currentFile.chapters[this._readerProvider._currentChapter]
+			if (!chapter) return
 
-			const fullContent = getChapterContentAsString(chapter);
-			
+			const fullContent = getChapterContentAsString(chapter)
+
 			// 优先使用字符偏移量，如果没有则使用百分比计算
-			let newTextOffset = charOffset || Math.floor(scrollPercentage * fullContent.length);
-			
+			let newTextOffset = charOffset || Math.floor(scrollPercentage * fullContent.length)
+
 			// 确保偏移量在有效范围内
-			newTextOffset = Math.max(0, Math.min(newTextOffset, fullContent.length - 1));
-			
+			newTextOffset = Math.max(0, Math.min(newTextOffset, fullContent.length - 1))
+
 			// 更新状态栏位置
-			this._readerProvider._scrollOffset = newTextOffset;
-			
+			this._readerProvider._scrollOffset = newTextOffset
+
 			// 立即更新状态栏显示（传入章节参数）
-			this._readerProvider._displayChapterText(chapter);
-			
+			this._readerProvider._displayChapterText(chapter)
+
 			// 保存当前状态
-			this._readerProvider._saveCurrentState();
-			
-			console.log(`滚动位置已同步: 字符偏移量 ${newTextOffset}`);
+			this._readerProvider._saveCurrentState()
+
+			console.log(`滚动位置已同步: 字符偏移量 ${newTextOffset}`)
 		} catch (error) {
-			console.error('处理滚动位置响应失败:', error);
+			console.error('处理滚动位置响应失败:', error)
 		}
 	}
 
@@ -693,9 +704,9 @@ class FloatingWindowManager {
 	 * 处理滚轮滚动事件
 	 */
 	_handleWheelScroll(deltaY, ctrlKey = false) {
-		const newContent = this._scrollHandler.handleWheelEvent(deltaY, ctrlKey);
+		const newContent = this._scrollHandler.handleWheelEvent(deltaY, ctrlKey)
 		if (newContent) {
-			this._updateContent(newContent);
+			this._updateContent(newContent)
 		}
 	}
 
@@ -704,25 +715,25 @@ class FloatingWindowManager {
 	 */
 	_onChapterPreviewDisposed() {
 		// 使用最后记录的滚动位置进行同步（WebView已经disposed，无法发送消息）
-		this._syncLastScrollPositionToStatusBar();
-		
-		this._webviewPanel = null;
-		this._isVisible = false;
-		this._currentContent = null;
-		
+		this._syncLastScrollPositionToStatusBar()
+
+		this._webviewPanel = null
+		this._isVisible = false
+		this._currentContent = null
+
 		// 清理滚动位置记录
-		this._lastScrollTop = 0;
-		this._lastScrollPercentage = 0;
-		this._lastCharOffset = 0;
-		
-		console.log('章节预览面板已关闭');
+		this._lastScrollTop = 0
+		this._lastScrollPercentage = 0
+		this._lastCharOffset = 0
+
+		console.log('章节预览面板已关闭')
 	}
 
 	/**
 	 * 面板关闭事件处理（保留旧方法用于兼容）
 	 */
 	_onPanelDisposed() {
-		return this._onChapterPreviewDisposed();
+		return this._onChapterPreviewDisposed()
 	}
 
 	/**
@@ -1216,7 +1227,7 @@ class FloatingWindowManager {
         vscode.postMessage({ type: 'ready' });
     </script>
 </body>
-</html>`;
+</html>`
 	}
 
 	/**
@@ -1372,7 +1383,7 @@ class FloatingWindowManager {
         vscode.postMessage({ type: 'ready' });
     </script>
 </body>
-</html>`;
+</html>`
 	}
 }
 
@@ -1381,15 +1392,15 @@ class FloatingWindowManager {
  */
 class MouseEventListener {
 	constructor(altKeyManager, floatingWindowManager, readerProvider, scrollHandler) {
-		this._altKeyManager = altKeyManager;
-		this._floatingWindowManager = floatingWindowManager;
-		this._readerProvider = readerProvider;
-		this._scrollHandler = scrollHandler;
-		this._disposables = [];
-		this._isHoverActive = false;
-		this._showTimer = null;
-		this._hideTimer = null;
-		this._checkInterval = null;
+		this._altKeyManager = altKeyManager
+		this._floatingWindowManager = floatingWindowManager
+		this._readerProvider = readerProvider
+		this._scrollHandler = scrollHandler
+		this._disposables = []
+		this._isHoverActive = false
+		this._showTimer = null
+		this._hideTimer = null
+		this._checkInterval = null
 	}
 
 	/**
@@ -1398,23 +1409,23 @@ class MouseEventListener {
 	startListening() {
 		// 监听编辑器光标位置变化（检测鼠标是否在编辑器中）
 		const selectionChangeDisposable = vscode.window.onDidChangeTextEditorSelection((event) => {
-			this._onEditorSelectionChange(event);
-		});
-		this._disposables.push(selectionChangeDisposable);
+			this._onEditorSelectionChange(event)
+		})
+		this._disposables.push(selectionChangeDisposable)
 
 		// 监听活动编辑器变化
 		const editorChangeDisposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
-			this._onEditorChange(editor);
-		});
-		this._disposables.push(editorChangeDisposable);
+			this._onEditorChange(editor)
+		})
+		this._disposables.push(editorChangeDisposable)
 
 		// 监听Alt键状态变化
-		this._altKeyManager.addListener(this._onAltKeyChanged.bind(this));
+		this._altKeyManager.addListener(this._onAltKeyChanged.bind(this))
 
 		// 定期检查编辑器状态（作为补充）
-		this._startPeriodicCheck();
+		this._startPeriodicCheck()
 
-		console.log('编辑器事件监听器已启动');
+		console.log('编辑器事件监听器已启动')
 	}
 
 	/**
@@ -1423,9 +1434,9 @@ class MouseEventListener {
 	_onEditorSelectionChange(event) {
 		// 检查是否启用悬停功能
 		if (this._shouldShowFloatingWindow()) {
-			this._showFloatingWindowDelayed();
+			this._showFloatingWindowDelayed()
 		} else {
-			this._hideFloatingWindowDelayed();
+			this._hideFloatingWindowDelayed()
 		}
 	}
 
@@ -1435,11 +1446,11 @@ class MouseEventListener {
 	_onEditorChange(editor) {
 		if (!editor) {
 			// 没有活动编辑器，隐藏悬浮窗
-			this._hideFloatingWindowDelayed();
+			this._hideFloatingWindowDelayed()
 		} else {
 			// 有活动编辑器，检查是否应该显示
 			if (this._shouldShowFloatingWindow()) {
-				this._showFloatingWindowDelayed();
+				this._showFloatingWindowDelayed()
 			}
 		}
 	}
@@ -1452,14 +1463,14 @@ class MouseEventListener {
 		this._checkInterval = setInterval(() => {
 			if (this._shouldShowFloatingWindow()) {
 				if (!this._isHoverActive) {
-					this._showFloatingWindowDelayed();
+					this._showFloatingWindowDelayed()
 				}
 			} else {
 				if (this._isHoverActive) {
-					this._hideFloatingWindowDelayed();
+					this._hideFloatingWindowDelayed()
 				}
 			}
-		}, 500);
+		}, 500)
 	}
 
 	/**
@@ -1468,37 +1479,37 @@ class MouseEventListener {
 	_shouldShowFloatingWindow() {
 		// 检查Alt键状态（真实的或强制启用的）
 		if (!this._altKeyManager.isAltPressed() && !this._altKeyManager._forceEnabled) {
-			return false;
+			return false
 		}
 
 		// 检查是否有活动编辑器
-		const editor = vscode.window.activeTextEditor;
+		const editor = vscode.window.activeTextEditor
 		if (!editor) {
-			return false;
+			return false
 		}
 
 		// 检查是否有当前阅读内容
 		if (!this._readerProvider._currentFile || this._readerProvider._currentChapter === null) {
-			return false;
+			return false
 		}
 
-		return true;
+		return true
 	}
 
 	/**
 	 * Alt键状态变化处理
 	 */
 	_onAltKeyChanged(isPressed) {
-		console.log(`Alt键状态变化: ${isPressed ? '按下' : '释放'}`);
-		
+		console.log(`Alt键状态变化: ${isPressed ? '按下' : '释放'}`)
+
 		if (isPressed) {
 			// Alt键按下，检查是否应该显示悬浮窗
 			if (this._shouldShowFloatingWindow()) {
-				this._showFloatingWindowDelayed();
+				this._showFloatingWindowDelayed()
 			}
 		} else {
 			// Alt键释放，隐藏悬浮窗
-			this._hideFloatingWindowDelayed();
+			this._hideFloatingWindowDelayed()
 		}
 	}
 
@@ -1508,23 +1519,23 @@ class MouseEventListener {
 	_showFloatingWindowDelayed() {
 		// 清除隐藏定时器
 		if (this._hideTimer) {
-			clearTimeout(this._hideTimer);
-			this._hideTimer = null;
+			clearTimeout(this._hideTimer)
+			this._hideTimer = null
 		}
 
 		// 如果已经在显示，不需要重新显示
 		if (this._isHoverActive || this._floatingWindowManager.isVisible()) {
-			return;
+			return
 		}
 
 		// 延迟显示（避免频繁触发）
 		if (this._showTimer) {
-			clearTimeout(this._showTimer);
+			clearTimeout(this._showTimer)
 		}
 
 		this._showTimer = setTimeout(() => {
-			this._showFloatingWindow();
-		}, 200); // 200ms延迟
+			this._showFloatingWindow()
+		}, 200) // 200ms延迟
 	}
 
 	/**
@@ -1533,18 +1544,18 @@ class MouseEventListener {
 	_hideFloatingWindowDelayed() {
 		// 清除显示定时器
 		if (this._showTimer) {
-			clearTimeout(this._showTimer);
-			this._showTimer = null;
+			clearTimeout(this._showTimer)
+			this._showTimer = null
 		}
 
 		// 延迟隐藏（给用户时间移动到悬浮窗）
 		if (this._hideTimer) {
-			clearTimeout(this._hideTimer);
+			clearTimeout(this._hideTimer)
 		}
 
 		this._hideTimer = setTimeout(() => {
-			this._hideFloatingWindow();
-		}, 300); // 300ms延迟
+			this._hideFloatingWindow()
+		}, 300) // 300ms延迟
 	}
 
 	/**
@@ -1552,23 +1563,22 @@ class MouseEventListener {
 	 */
 	async _showFloatingWindow() {
 		try {
-			if (this._isHoverActive) return;
+			if (this._isHoverActive) return
 
 			// 获取当前阅读内容
-			const content = this._getCurrentReaderContent();
-			if (!content) return;
+			const content = this._getCurrentReaderContent()
+			if (!content) return
 
 			// 初始化滚动处理器
-			this._scrollHandler.initialize();
+			this._scrollHandler.initialize()
 
 			// 显示悬浮窗
-			await this._floatingWindowManager.showAt(content);
-			this._isHoverActive = true;
+			await this._floatingWindowManager.showAt(content)
+			this._isHoverActive = true
 
-			console.log('悬浮窗已显示:', content.chapterTitle);
-
+			console.log('悬浮窗已显示:', content.chapterTitle)
 		} catch (error) {
-			console.error('显示悬浮窗失败:', error);
+			console.error('显示悬浮窗失败:', error)
 		}
 	}
 
@@ -1577,9 +1587,9 @@ class MouseEventListener {
 	 */
 	_hideFloatingWindow() {
 		if (this._isHoverActive) {
-			this._floatingWindowManager.hide();
-			this._scrollHandler.reset();
-			this._isHoverActive = false;
+			this._floatingWindowManager.hide()
+			this._scrollHandler.reset()
+			this._isHoverActive = false
 		}
 	}
 
@@ -1587,27 +1597,27 @@ class MouseEventListener {
 	 * 获取当前阅读内容
 	 */
 	_getCurrentReaderContent() {
-		const currentFile = this._readerProvider._currentFile;
+		const currentFile = this._readerProvider._currentFile
 		if (!currentFile || !currentFile.chapters || this._readerProvider._currentChapter === null) {
-			return null;
+			return null
 		}
 
-		const chapter = currentFile.chapters[this._readerProvider._currentChapter];
-		if (!chapter) return null;
+		const chapter = currentFile.chapters[this._readerProvider._currentChapter]
+		if (!chapter) return null
 
-		const scrollOffset = this._readerProvider._scrollOffset;
-		const displayLength = 300; // 显示300个字符
+		const scrollOffset = this._readerProvider._scrollOffset
+		const displayLength = 300 // 显示300个字符
 
 		// 使用辅助函数处理内容
-		const fullContent = getChapterContentAsString(chapter);
+		const fullContent = getChapterContentAsString(chapter)
 		if (!fullContent) {
-			console.error('Empty or invalid chapter content in getCurrentReaderContent');
-			return null;
+			console.error('Empty or invalid chapter content in getCurrentReaderContent')
+			return null
 		}
 
 		// 获取文字内容
-		const text = fullContent.substring(scrollOffset, scrollOffset + displayLength);
-		const position = `${scrollOffset}-${scrollOffset + text.length}/${fullContent.length}`;
+		const text = fullContent.substring(scrollOffset, scrollOffset + displayLength)
+		const position = `${scrollOffset}-${scrollOffset + text.length}/${fullContent.length}`
 
 		return {
 			text: text,
@@ -1616,14 +1626,14 @@ class MouseEventListener {
 			scrollPosition: scrollOffset,
 			maxPosition: fullContent.length,
 			hasMore: scrollOffset + displayLength < fullContent.length
-		};
+		}
 	}
 
 	/**
 	 * 手动触发Alt键状态（用于测试或命令触发）
 	 */
 	triggerAltKey(pressed) {
-		this._altKeyManager.setAltPressed(pressed);
+		this._altKeyManager.setAltPressed(pressed)
 	}
 
 	/**
@@ -1632,27 +1642,27 @@ class MouseEventListener {
 	dispose() {
 		// 清理定时器
 		if (this._showTimer) {
-			clearTimeout(this._showTimer);
-			this._showTimer = null;
+			clearTimeout(this._showTimer)
+			this._showTimer = null
 		}
 		if (this._hideTimer) {
-			clearTimeout(this._hideTimer);
-			this._hideTimer = null;
+			clearTimeout(this._hideTimer)
+			this._hideTimer = null
 		}
 		if (this._checkInterval) {
-			clearInterval(this._checkInterval);
-			this._checkInterval = null;
+			clearInterval(this._checkInterval)
+			this._checkInterval = null
 		}
 
 		// 隐藏悬浮窗
-		this._hideFloatingWindow();
+		this._hideFloatingWindow()
 
 		// 移除Alt键监听器
-		this._altKeyManager.removeListener(this._onAltKeyChanged.bind(this));
+		this._altKeyManager.removeListener(this._onAltKeyChanged.bind(this))
 
 		// 清理所有disposables
-		this._disposables.forEach(disposable => disposable.dispose());
-		this._disposables = [];
+		this._disposables.forEach((disposable) => disposable.dispose())
+		this._disposables = []
 	}
 }
 
@@ -1661,7 +1671,7 @@ class MouseEventListener {
  */
 class StorageManager {
 	constructor(context) {
-		this._context = context;
+		this._context = context
 	}
 
 	/**
@@ -1670,12 +1680,12 @@ class StorageManager {
 	async saveFiles(files) {
 		try {
 			// 序列化文件列表，只保存必要信息
-			const serializedFiles = files.map(file => ({
+			const serializedFiles = files.map((file) => ({
 				id: file.id,
 				name: file.name,
 				type: file.type,
 				path: file.path || '',
-				fullText: file.type === '粘贴' ? file.fullText : '',  // 只保存粘贴内容的文本
+				fullText: file.type === '粘贴' ? file.fullText : '', // 只保存粘贴内容的文本
 				addedTime: file.addedTime || Date.now(),
 				status: file.status || 'active',
 				// 保存阅读位置信息
@@ -1684,12 +1694,11 @@ class StorageManager {
 				lastReadTime: file.lastReadTime ?? null,
 				// 保存章节位置映射
 				chapterPositions: file.chapterPositions || {}
-			}));
-			
-			// ponytail: 存储键沿用 thief-reader.* 前缀，改名会让已有书库读不到；需要改名时先写一次性迁移
-			await this._context.globalState.update('thief-reader.files', serializedFiles);
+			}))
+
+			await this._context.globalState.update(STORAGE_KEYS.files, serializedFiles)
 		} catch (error) {
-			console.error('保存文件列表失败:', error);
+			console.error('保存文件列表失败:', error)
 		}
 	}
 
@@ -1698,12 +1707,30 @@ class StorageManager {
 	 */
 	async loadFiles() {
 		try {
-			const files = await this._context.globalState.get('thief-reader.files');
-			return files || [];
+			const files = await this._context.globalState.get(STORAGE_KEYS.files)
+			if (files) {
+				return files
+			}
+			return (await this._migrateLegacyKey(STORAGE_KEYS.files, LEGACY_STORAGE_KEYS.files)) || []
 		} catch (error) {
-			console.error('加载文件列表失败:', error);
-			return [];
+			console.error('加载文件列表失败:', error)
+			return []
 		}
+	}
+
+	/**
+	 * 把旧键的数据搬到新键并清掉旧键，返回搬过来的值（没有旧数据则返回 null）
+	 */
+	async _migrateLegacyKey(currentKey, legacyKey) {
+		const legacyValue = await this._context.globalState.get(legacyKey)
+		if (legacyValue === undefined || legacyValue === null) {
+			return null
+		}
+
+		await this._context.globalState.update(currentKey, legacyValue)
+		await this._context.globalState.update(legacyKey, undefined)
+		console.log(`已迁移旧存储键 ${legacyKey} -> ${currentKey}`)
+		return legacyValue
 	}
 
 	/**
@@ -1711,14 +1738,14 @@ class StorageManager {
 	 */
 	async saveReadingState(state) {
 		try {
-			await this._context.globalState.update('thief-reader.readingState', {
+			await this._context.globalState.update(STORAGE_KEYS.readingState, {
 				currentFileId: state.currentFileId,
 				currentChapter: state.currentChapter,
 				scrollOffset: state.scrollOffset,
 				lastSaveTime: Date.now()
-			});
+			})
 		} catch (error) {
-			console.error('保存阅读状态失败:', error);
+			console.error('保存阅读状态失败:', error)
 		}
 	}
 
@@ -1727,11 +1754,14 @@ class StorageManager {
 	 */
 	async loadReadingState() {
 		try {
-			const state = await this._context.globalState.get('thief-reader.readingState');
-			return state || null;
+			const state = await this._context.globalState.get(STORAGE_KEYS.readingState)
+			if (state) {
+				return state
+			}
+			return await this._migrateLegacyKey(STORAGE_KEYS.readingState, LEGACY_STORAGE_KEYS.readingState)
 		} catch (error) {
-			console.error('加载阅读状态失败:', error);
-			return null;
+			console.error('加载阅读状态失败:', error)
+			return null
 		}
 	}
 
@@ -1740,10 +1770,13 @@ class StorageManager {
 	 */
 	async clearAll() {
 		try {
-			await this._context.globalState.update('thief-reader.files', undefined);
-			await this._context.globalState.update('thief-reader.readingState', undefined);
+			// 旧键一并清掉，否则清空后下次启动又会被迁移逻辑捡回来
+			await Promise.all([
+				...Object.values(STORAGE_KEYS),
+				...Object.values(LEGACY_STORAGE_KEYS)
+			].map(key => this._context.globalState.update(key, undefined)))
 		} catch (error) {
-			console.error('清空数据失败:', error);
+			console.error('清空数据失败:', error)
 		}
 	}
 }
@@ -1753,35 +1786,35 @@ class StorageManager {
  */
 class ThiefReaderWebviewProvider {
 	constructor(context) {
-		this._context = context;
-		this._files = []; // 存储加载的所有文件信息（PDF/TXT/EPUB/粘贴内容）
-		this._currentFile = null; // 当前选中的文件
-		this._currentChapter = null; // 当前选中的章节
-		this._currentPage = 0; // 当前页码
-		this._scrollOffset = 0; // 文字滑动偏移量
-		this._statusBarItem = null; // 状态栏项目
-		this._opacity = 100; // 状态栏透明度，默认100%
-		this._statusBarVisible = true; // 状态栏文字显示状态，默认显示
-		this._storageManager = new StorageManager(context); // 存储管理器
-		this._saveDebounceTimer = null; // 防抖定时器
-		this._isRestoring = false; // 是否正在恢复数据
-		
-		// 章节预览功能组件
-		this._altKeyManager = new AltKeyManager(); // Alt键状态管理器（保留用于兼容性）
-		this._scrollHandler = new ScrollWheelHandler(this); // 滚轮滚动处理器（保留用于兼容性）
-		this._floatingWindowManager = new FloatingWindowManager(context, this, this._scrollHandler); // 悬浮窗管理器
-		this._mouseEventListener = new MouseEventListener(this._altKeyManager, this._floatingWindowManager, this, this._scrollHandler); // 鼠标事件监听器（保留用于兼容性）
-		
-		// 阅读模式：开启后数字键 2/1 翻页，默认关闭以免抢占正常输入
-		this._readingModeEnabled = false;
+		this._context = context
+		this._files = [] // 存储加载的所有文件信息（PDF/TXT/EPUB/粘贴内容）
+		this._currentFile = null // 当前选中的文件
+		this._currentChapter = null // 当前选中的章节
+		this._currentPage = 0 // 当前页码
+		this._scrollOffset = 0 // 文字滑动偏移量
+		this._statusBarItem = null // 状态栏项目
+		this._opacity = 100 // 状态栏透明度，默认100%
+		this._statusBarVisible = true // 状态栏文字显示状态，默认显示
+		this._storageManager = new StorageManager(context) // 存储管理器
+		this._saveDebounceTimer = null // 防抖定时器
+		this._isRestoring = false // 是否正在恢复数据
 
-		this._loadOpacity(); // 从配置中加载透明度
-		this._loadDisplayLength(); // 从配置中加载一屏显示字符数
-		this._initStatusBar();
-		this._registerReadingMode();
-		this._watchDisplayLength();
+		// 章节预览功能组件
+		this._altKeyManager = new AltKeyManager() // Alt键状态管理器（保留用于兼容性）
+		this._scrollHandler = new ScrollWheelHandler(this) // 滚轮滚动处理器（保留用于兼容性）
+		this._floatingWindowManager = new FloatingWindowManager(context, this, this._scrollHandler) // 悬浮窗管理器
+		this._mouseEventListener = new MouseEventListener(this._altKeyManager, this._floatingWindowManager, this, this._scrollHandler) // 鼠标事件监听器（保留用于兼容性）
+
+		// 阅读模式：开启后数字键 2/1 翻页，默认关闭以免抢占正常输入
+		this._readingModeEnabled = false
+
+		this._loadOpacity() // 从配置中加载透明度
+		this._loadDisplayLength() // 从配置中加载一屏显示字符数
+		this._initStatusBar()
+		this._registerReadingMode()
+		this._watchDisplayLength()
 		// 移除旧的悬停功能初始化，新功能直接集成到状态栏按钮中
-		this._restoreData(); // 恢复数据
+		this._restoreData() // 恢复数据
 	}
 
 	/**
@@ -1792,15 +1825,15 @@ class ThiefReaderWebviewProvider {
 	 */
 	_registerReadingMode() {
 		const toggleCommand = vscode.commands.registerCommand('lazyNovel.toggleReadingMode', () => {
-			this._readingModeEnabled = !this._readingModeEnabled;
-			vscode.commands.executeCommand('setContext', 'lazyNovel.readingMode', this._readingModeEnabled);
+			this._readingModeEnabled = !this._readingModeEnabled
+			vscode.commands.executeCommand('setContext', 'lazyNovel.readingMode', this._readingModeEnabled)
 			vscode.window.setStatusBarMessage(
 				this._readingModeEnabled ? '阅读模式已开启：2 向后翻页 / 1 向前翻页' : '阅读模式已关闭',
 				2000
-			);
-		});
+			)
+		})
 
-		this._context.subscriptions.push(toggleCommand);
+		this._context.subscriptions.push(toggleCommand)
 	}
 
 	/**
@@ -1809,35 +1842,35 @@ class ThiefReaderWebviewProvider {
 	_watchDisplayLength() {
 		const watcher = vscode.workspace.onDidChangeConfiguration((event) => {
 			if (!event.affectsConfiguration('lazyNovel.displayLength')) {
-				return;
+				return
 			}
 
-			this._loadDisplayLength();
+			this._loadDisplayLength()
 			if (this._currentChapter !== null && this._currentFile && this._currentFile.chapters) {
-				this._displayChapterText(this._currentFile.chapters[this._currentChapter]);
+				this._displayChapterText(this._currentFile.chapters[this._currentChapter])
 			}
-		});
+		})
 
-		this._context.subscriptions.push(watcher);
+		this._context.subscriptions.push(watcher)
 	}
 
 	/**
 	 * 初始化状态栏
 	 */
 	_initStatusBar() {
-		this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-		this._statusBarItem.text = "reader: 准备就绪 📖";
-		this._statusBarItem.tooltip = READING_SHORTCUT_HINT;
+		this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100)
+		this._statusBarItem.text = "reader: 准备就绪 📖"
+		this._statusBarItem.tooltip = READING_SHORTCUT_HINT
 		// 不绑定 command：点击状态栏不再触发章节预览
-		this._statusBarItem.show();
-		this._context.subscriptions.push(this._statusBarItem);
+		this._statusBarItem.show()
+		this._context.subscriptions.push(this._statusBarItem)
 	}
 
 	/**
 	 * 切换章节预览
 	 */
 	toggleChapterPreview() {
-		this._floatingWindowManager.toggleChapterPreview();
+		this._floatingWindowManager.toggleChapterPreview()
 	}
 
 	/**
@@ -1845,7 +1878,7 @@ class ThiefReaderWebviewProvider {
 	 */
 	_initHoverFeature() {
 		// 功能已整合到状态栏按钮和章节预览中
-		console.log('章节预览功能已就绪');
+		console.log('章节预览功能已就绪')
 	}
 
 	/**
@@ -1853,33 +1886,33 @@ class ThiefReaderWebviewProvider {
 	 */
 	async _restoreData() {
 		try {
-			this._isRestoring = true;
-			
+			this._isRestoring = true
+
 			// 加载保存的文件列表
-			const savedFiles = await this._storageManager.loadFiles();
-			
+			const savedFiles = await this._storageManager.loadFiles()
+
 			// 第一次安装或没有保存的数据
 			if (!savedFiles || savedFiles.length === 0) {
-				this._statusBarItem.text = "reader: 准备就绪";
+				this._statusBarItem.text = 'reader: 准备就绪'
 				// 确保弹窗在首次启动时是关闭的
 				if (this._floatingWindowManager.isVisible()) {
-					this._floatingWindowManager.hide();
+					this._floatingWindowManager.hide()
 				}
-				this._isRestoring = false;
-				return;
+				this._isRestoring = false
+				return
 			}
-			
+
 			// 有数据需要恢复时才显示恢复中的提示
-			this._statusBarItem.text = "reader: 正在恢复数据...";
-			
-			const restoredFiles = [];
-			const failedFiles = [];
-			
+			this._statusBarItem.text = 'reader: 正在恢复数据...'
+
+			const restoredFiles = []
+			const failedFiles = []
+
 			// 遍历恢复每个文件
 			for (const savedFile of savedFiles) {
 				if (savedFile.type === '粘贴') {
 					// 粘贴内容直接恢复
-					const chapters = this._extractChaptersWithFallback(savedFile.fullText);
+					const chapters = this._extractChaptersWithFallback(savedFile.fullText)
 					restoredFiles.push({
 						id: savedFile.id,
 						name: savedFile.name,
@@ -1895,7 +1928,7 @@ class ThiefReaderWebviewProvider {
 						lastReadTime: savedFile.lastReadTime ?? null,
 						// 恢复章节位置映射
 						chapterPositions: savedFile.chapterPositions || {}
-					});
+					})
 				} else {
 					// 本地文件需要检查和重新加载
 					if (!savedFile.path || !fs.existsSync(savedFile.path)) {
@@ -1914,31 +1947,31 @@ class ThiefReaderWebviewProvider {
 							lastScrollOffset: savedFile.lastScrollOffset ?? 0,
 							lastReadTime: savedFile.lastReadTime ?? null,
 							chapterPositions: savedFile.chapterPositions || {}
-						});
+						})
 						failedFiles.push({
 							name: savedFile.name,
 							reason: '文件不存在'
-						});
+						})
 					} else {
 						// 文件存在，尝试重新加载
 						try {
-							const fileUri = vscode.Uri.file(savedFile.path);
-							const fileInfo = await this._loadFileQuietly(fileUri, savedFile.id);
+							const fileUri = vscode.Uri.file(savedFile.path)
+							const fileInfo = await this._loadFileQuietly(fileUri, savedFile.id)
 							if (fileInfo) {
 								// 恢复阅读位置
-								fileInfo.lastChapter = savedFile.lastChapter ?? null;
-								fileInfo.lastScrollOffset = savedFile.lastScrollOffset ?? 0;
-								fileInfo.lastReadTime = savedFile.lastReadTime ?? null;
+								fileInfo.lastChapter = savedFile.lastChapter ?? null
+								fileInfo.lastScrollOffset = savedFile.lastScrollOffset ?? 0
+								fileInfo.lastReadTime = savedFile.lastReadTime ?? null
 								// 恢复章节位置映射
-								fileInfo.chapterPositions = savedFile.chapterPositions || {};
-								
+								fileInfo.chapterPositions = savedFile.chapterPositions || {}
+
 								// 验证章节索引是否有效
 								if (fileInfo.lastChapter !== null && fileInfo.lastChapter >= fileInfo.chapters.length) {
-									fileInfo.lastChapter = 0;
-									fileInfo.lastScrollOffset = 0;
+									fileInfo.lastChapter = 0
+									fileInfo.lastScrollOffset = 0
 								}
-								
-								restoredFiles.push(fileInfo);
+
+								restoredFiles.push(fileInfo)
 							}
 						} catch (error) {
 							// 解析失败
@@ -1956,59 +1989,59 @@ class ThiefReaderWebviewProvider {
 								lastScrollOffset: savedFile.lastScrollOffset ?? 0,
 								lastReadTime: savedFile.lastReadTime ?? null,
 								chapterPositions: savedFile.chapterPositions || {}
-							});
+							})
 							failedFiles.push({
 								name: savedFile.name,
 								reason: '文件解析失败: ' + error.message
-							});
+							})
 						}
 					}
 				}
 			}
-			
+
 			// 更新文件列表
-			this._files = restoredFiles;
-			
+			this._files = restoredFiles
+
 			// 显示恢复结果（只在有文件时显示）
 			if (restoredFiles.length > 0) {
 				if (failedFiles.length > 0) {
-					const message = `恢复了 ${restoredFiles.length} 个文件，其中 ${failedFiles.length} 个加载失败`;
-					vscode.window.showWarningMessage(message, '查看详情', '清理失效文件').then(selection => {
+					const message = `恢复了 ${restoredFiles.length} 个文件，其中 ${failedFiles.length} 个加载失败`
+					vscode.window.showWarningMessage(message, '查看详情', '清理失效文件').then((selection) => {
 						if (selection === '查看详情') {
-							const details = failedFiles.map(f => `• ${f.name}: ${f.reason}`).join('\n');
-							vscode.window.showInformationMessage(details);
+							const details = failedFiles.map((f) => `• ${f.name}: ${f.reason}`).join('\n')
+							vscode.window.showInformationMessage(details)
 						} else if (selection === '清理失效文件') {
-							this._cleanupMissingFiles();
+							this._cleanupMissingFiles()
 						}
-					});
+					})
 				} else {
-					vscode.window.showInformationMessage(`成功恢复 ${restoredFiles.length} 个文件`);
+					vscode.window.showInformationMessage(`成功恢复 ${restoredFiles.length} 个文件`)
 				}
 			}
-			
+
 			// 恢复阅读位置
-			await this._restoreReadingState();
-			
+			await this._restoreReadingState()
+
 			// 刷新界面
 			if (this._view) {
-				this._refreshView();
+				this._refreshView()
 			}
-			
+
 			// 确保弹窗在启动时是关闭的
 			if (this._floatingWindowManager.isVisible()) {
-				this._floatingWindowManager.hide();
+				this._floatingWindowManager.hide()
 			}
-			
-			this._isRestoring = false;
+
+			this._isRestoring = false
 		} catch (error) {
-			console.error('恢复数据失败:', error);
-			vscode.window.showErrorMessage('恢复阅读数据失败: ' + error.message);
-			this._statusBarItem.text = "reader: 准备就绪";
+			console.error('恢复数据失败:', error)
+			vscode.window.showErrorMessage('恢复阅读数据失败: ' + error.message)
+			this._statusBarItem.text = 'reader: 准备就绪'
 			// 确保弹窗在出错时也是关闭的
 			if (this._floatingWindowManager.isVisible()) {
-				this._floatingWindowManager.hide();
+				this._floatingWindowManager.hide()
 			}
-			this._isRestoring = false;
+			this._isRestoring = false
 		}
 	}
 
@@ -2017,55 +2050,53 @@ class ThiefReaderWebviewProvider {
 	 */
 	async _restoreReadingState() {
 		try {
-			const state = await this._storageManager.loadReadingState();
-			
+			const state = await this._storageManager.loadReadingState()
+
 			if (!state || !state.currentFileId) {
-				this._statusBarItem.text = "reader: 准备就绪";
-				return;
+				this._statusBarItem.text = 'reader: 准备就绪'
+				return
 			}
-			
+
 			// 查找文件
-			const file = this._files.find(f => f.id === state.currentFileId);
-			
+			const file = this._files.find((f) => f.id === state.currentFileId)
+
 			if (!file) {
 				// 文件已被删除
-				this._statusBarItem.text = "reader: 准备就绪";
-				return;
+				this._statusBarItem.text = 'reader: 准备就绪'
+				return
 			}
-			
+
 			if (file.status === 'missing' || file.status === 'error') {
 				// 文件不可用
-				vscode.window.showWarningMessage(
-					`上次阅读的文件 "${file.name}" 无法加载，请重新选择文件`
-				);
-				this._statusBarItem.text = "reader: 准备就绪";
-				return;
+				vscode.window.showWarningMessage(`上次阅读的文件 "${file.name}" 无法加载，请重新选择文件`)
+				this._statusBarItem.text = 'reader: 准备就绪'
+				return
 			}
-			
+
 			// 恢复选择
-			this._currentFile = file;
-			
+			this._currentFile = file
+
 			// 使用文件自己保存的阅读位置
-			this._restoreFileReadingPosition(file);
-			
+			this._restoreFileReadingPosition(file)
+
 			// 显示内容
 			if (this._currentChapter !== null && file.chapters && file.chapters.length > 0) {
-				const chapter = file.chapters[this._currentChapter];
-				this._displayChapterText(chapter);
+				const chapter = file.chapters[this._currentChapter]
+				this._displayChapterText(chapter)
 			} else {
-				this._statusBarItem.text = `reader: 已恢复 ${file.name}`;
+				this._statusBarItem.text = `reader: 已恢复 ${file.name}`
 			}
-			
+
 			// 确保弹窗在恢复后是关闭的
 			if (this._floatingWindowManager.isVisible()) {
-				this._floatingWindowManager.hide();
+				this._floatingWindowManager.hide()
 			}
 		} catch (error) {
-			console.error('恢复阅读状态失败:', error);
-			this._statusBarItem.text = "reader: 准备就绪";
+			console.error('恢复阅读状态失败:', error)
+			this._statusBarItem.text = 'reader: 准备就绪'
 			// 确保弹窗在出错时也是关闭的
 			if (this._floatingWindowManager.isVisible()) {
-				this._floatingWindowManager.hide();
+				this._floatingWindowManager.hide()
 			}
 		}
 	}
@@ -2074,34 +2105,34 @@ class ThiefReaderWebviewProvider {
 	 * 静默加载文件（用于恢复数据）
 	 */
 	async _loadFileQuietly(fileUri, fileId) {
-		const filePath = fileUri.fsPath;
-		const fileName = path.basename(filePath);
-		const fileExtension = path.extname(filePath).toLowerCase();
-		
-		let fileContent = '';
-		let pageCount = 1;
-		let chapters = [];
-		
+		const filePath = fileUri.fsPath
+		const fileName = path.basename(filePath)
+		const fileExtension = path.extname(filePath).toLowerCase()
+
+		let fileContent = ''
+		let pageCount = 1
+		let chapters = []
+
 		if (fileExtension === '.pdf') {
-			const fileBuffer = fs.readFileSync(filePath);
-			const pdfData = await pdf(fileBuffer);
-			fileContent = pdfData.text;
-			pageCount = pdfData.numpages;
-			chapters = this._extractChapters(fileContent);
+			const fileBuffer = fs.readFileSync(filePath)
+			const pdfData = await pdf(fileBuffer)
+			fileContent = pdfData.text
+			pageCount = pdfData.numpages
+			chapters = this._extractChapters(fileContent)
 		} else if (fileExtension === '.txt') {
-			fileContent = fs.readFileSync(filePath, 'utf8');
-			const lineCount = fileContent.split('\n').length;
-			pageCount = Math.ceil(lineCount / 50);
-			chapters = this._extractChapters(fileContent);
+			fileContent = fs.readFileSync(filePath, 'utf8')
+			const lineCount = fileContent.split('\n').length
+			pageCount = Math.ceil(lineCount / 50)
+			chapters = this._extractChapters(fileContent)
 		} else if (fileExtension === '.epub') {
-			const epubData = await this._parseEpub(filePath);
-			fileContent = epubData.content;
-			chapters = epubData.chapters;
-			pageCount = chapters.length;
+			const epubData = await this._parseEpub(filePath)
+			fileContent = epubData.content
+			chapters = epubData.chapters
+			pageCount = chapters.length
 		} else {
-			throw new Error(`不支持的文件格式: ${fileExtension}`);
+			throw new Error(`不支持的文件格式: ${fileExtension}`)
 		}
-		
+
 		return {
 			id: fileId || Date.now().toString(),
 			name: fileName,
@@ -2111,32 +2142,30 @@ class ThiefReaderWebviewProvider {
 			fullText: fileContent,
 			pages: pageCount,
 			status: 'active'
-		};
+		}
 	}
 
 	/**
 	 * 清理缺失和错误的文件
 	 */
 	_cleanupMissingFiles() {
-		const validFiles = this._files.filter(
-			f => f.status !== 'missing' && f.status !== 'error'
-		);
-		
-		const removedCount = this._files.length - validFiles.length;
-		this._files = validFiles;
-		
+		const validFiles = this._files.filter((f) => f.status !== 'missing' && f.status !== 'error')
+
+		const removedCount = this._files.length - validFiles.length
+		this._files = validFiles
+
 		// 如果当前文件被清理了，清空选择
 		if (this._currentFile && (this._currentFile.status === 'missing' || this._currentFile.status === 'error')) {
-			this._currentFile = null;
-			this._currentChapter = null;
-			this._scrollOffset = 0;
-			this._statusBarItem.text = "reader: 准备就绪";
+			this._currentFile = null
+			this._currentChapter = null
+			this._scrollOffset = 0
+			this._statusBarItem.text = 'reader: 准备就绪'
 		}
-		
-		this._saveCurrentState();
-		this._refreshView();
-		
-		vscode.window.showInformationMessage(`已清理 ${removedCount} 个失效文件`);
+
+		this._saveCurrentState()
+		this._refreshView()
+
+		vscode.window.showInformationMessage(`已清理 ${removedCount} 个失效文件`)
 	}
 
 	/**
@@ -2145,15 +2174,15 @@ class ThiefReaderWebviewProvider {
 	 * @returns {string} - 格式化后的时间字符串 YYYY-MM-DD HH:mm:ss
 	 */
 	_formatTimestamp(timestamp) {
-		const date = new Date(timestamp);
-		const year = date.getFullYear();
-		const month = String(date.getMonth() + 1).padStart(2, '0');
-		const day = String(date.getDate()).padStart(2, '0');
-		const hours = String(date.getHours()).padStart(2, '0');
-		const minutes = String(date.getMinutes()).padStart(2, '0');
-		const seconds = String(date.getSeconds()).padStart(2, '0');
-		
-		return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+		const date = new Date(timestamp)
+		const year = date.getFullYear()
+		const month = String(date.getMonth() + 1).padStart(2, '0')
+		const day = String(date.getDate()).padStart(2, '0')
+		const hours = String(date.getHours()).padStart(2, '0')
+		const minutes = String(date.getMinutes()).padStart(2, '0')
+		const seconds = String(date.getSeconds()).padStart(2, '0')
+
+		return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 	}
 
 	/**
@@ -2163,22 +2192,22 @@ class ThiefReaderWebviewProvider {
 	 */
 	_generatePasteFileName(content) {
 		// 1. 清理文本（去除多余空白和换行）
-		const cleanContent = content.trim().replace(/\s+/g, ' ');
-		
+		const cleanContent = content.trim().replace(/\s+/g, ' ')
+
 		// 2. 提取前10个字符
-		const preview = cleanContent.substring(0, 10);
-		
+		const preview = cleanContent.substring(0, 10)
+
 		// 3. 生成时间戳
-		const timestamp = Date.now();
-		const formattedTime = this._formatTimestamp(timestamp);
-		
+		const timestamp = Date.now()
+		const formattedTime = this._formatTimestamp(timestamp)
+
 		// 4. 组合文件名
 		if (preview.length === 0) {
-			return `[粘贴内容]（空）（${formattedTime}）`;
+			return `[粘贴内容]（空）（${formattedTime}）`
 		} else if (cleanContent.length > 10) {
-			return `[粘贴内容]${preview}...（${formattedTime}）`;
+			return `[粘贴内容]${preview}...（${formattedTime}）`
 		} else {
-			return `[粘贴内容]${preview}（${formattedTime}）`;
+			return `[粘贴内容]${preview}（${formattedTime}）`
 		}
 	}
 
@@ -2186,30 +2215,30 @@ class ThiefReaderWebviewProvider {
 	 * 保存文件的阅读位置
 	 */
 	_saveFileReadingPosition(fileId) {
-		if (!fileId) return;
-		
-		const file = this._files.find(f => f.id === fileId);
-		if (!file) return;
-		
+		if (!fileId) return
+
+		const file = this._files.find((f) => f.id === fileId)
+		if (!file) return
+
 		// 更新文件的阅读位置
-		file.lastChapter = this._currentChapter;
-		file.lastScrollOffset = this._scrollOffset;
-		file.lastReadTime = Date.now();
+		file.lastChapter = this._currentChapter
+		file.lastScrollOffset = this._scrollOffset
+		file.lastReadTime = Date.now()
 	}
 
 	/**
 	 * 保存当前章节的滚动位置
 	 */
 	_saveChapterPosition(chapterIndex, scrollOffset) {
-		if (!this._currentFile || chapterIndex === null || chapterIndex === undefined) return;
-		
+		if (!this._currentFile || chapterIndex === null || chapterIndex === undefined) return
+
 		// 初始化 chapterPositions（如果不存在）
 		if (!this._currentFile.chapterPositions) {
-			this._currentFile.chapterPositions = {};
+			this._currentFile.chapterPositions = {}
 		}
-		
+
 		// 保存章节位置
-		this._currentFile.chapterPositions[chapterIndex] = scrollOffset;
+		this._currentFile.chapterPositions[chapterIndex] = scrollOffset
 	}
 
 	/**
@@ -2217,42 +2246,40 @@ class ThiefReaderWebviewProvider {
 	 */
 	_getChapterPosition(chapterIndex) {
 		if (!this._currentFile || chapterIndex === null || chapterIndex === undefined) {
-			return 0;
+			return 0
 		}
-		
+
 		// 如果没有 chapterPositions 或该章节没有保存位置，返回0
 		if (!this._currentFile.chapterPositions) {
-			return 0;
+			return 0
 		}
-		
-		return this._currentFile.chapterPositions[chapterIndex] ?? 0;
+
+		return this._currentFile.chapterPositions[chapterIndex] ?? 0
 	}
 
 	/**
 	 * 恢复文件的阅读位置
 	 */
 	_restoreFileReadingPosition(file) {
-		if (!file) return;
-		
+		if (!file) return
+
 		// 检查文件是否有保存的位置
 		if (file.lastChapter !== null && file.lastChapter !== undefined) {
 			// 验证章节索引是否有效
 			if (file.chapters && file.lastChapter >= file.chapters.length) {
 				// 章节越界，重置到第一章
-				this._currentChapter = file.chapters.length > 0 ? 0 : null;
-				this._scrollOffset = 0;
-				vscode.window.showWarningMessage(
-					`文件 "${file.name}" 的阅读位置已失效，已重置到开头`
-				);
+				this._currentChapter = file.chapters.length > 0 ? 0 : null
+				this._scrollOffset = 0
+				vscode.window.showWarningMessage(`文件 "${file.name}" 的阅读位置已失效，已重置到开头`)
 			} else {
 				// 正常恢复
-				this._currentChapter = file.lastChapter;
-				this._scrollOffset = file.lastScrollOffset || 0;
+				this._currentChapter = file.lastChapter
+				this._scrollOffset = file.lastScrollOffset || 0
 			}
 		} else {
 			// 首次打开，从头开始
-			this._currentChapter = file.chapters && file.chapters.length > 0 ? 0 : null;
-			this._scrollOffset = 0;
+			this._currentChapter = file.chapters && file.chapters.length > 0 ? 0 : null
+			this._scrollOffset = 0
 		}
 	}
 
@@ -2262,109 +2289,110 @@ class ThiefReaderWebviewProvider {
 	_saveCurrentState() {
 		// 如果正在恢复数据，不保存
 		if (this._isRestoring) {
-			return;
+			return
 		}
-		
+
 		// 更新当前文件的阅读位置
 		if (this._currentFile) {
-			this._saveFileReadingPosition(this._currentFile.id);
+			this._saveFileReadingPosition(this._currentFile.id)
 		}
-		
+
 		// 清除之前的定时器
 		if (this._saveDebounceTimer) {
-			clearTimeout(this._saveDebounceTimer);
+			clearTimeout(this._saveDebounceTimer)
 		}
-		
+
 		// 设置新的定时器（500ms 后保存）
 		this._saveDebounceTimer = setTimeout(async () => {
 			try {
 				// 保存文件列表（包含每个文件的阅读位置）
-				await this._storageManager.saveFiles(this._files);
-				
+				await this._storageManager.saveFiles(this._files)
+
 				// 保存当前选中的文件ID
 				if (this._currentFile) {
 					await this._storageManager.saveReadingState({
 						currentFileId: this._currentFile.id
-					});
+					})
 				}
 			} catch (error) {
-				console.error('保存状态失败:', error);
+				console.error('保存状态失败:', error)
 			}
-		}, 500);
+		}, 500)
 	}
 
 	/**
 	 * 解析 WebView 视图
-	 * @param {vscode.WebviewView} webviewView 
+	 * @param {vscode.WebviewView} webviewView
 	 */
 	resolveWebviewView(webviewView) {
-		this._view = webviewView;
+		this._view = webviewView
 
 		// 配置 WebView 选项
 		webviewView.webview.options = {
 			enableScripts: true,
 			localResourceRoots: [this._context.extensionUri]
-		};
+		}
 
 		// 设置 WebView 的 HTML 内容
-		webviewView.webview.html = this._getHtmlContent();
+		webviewView.webview.html = this._getHtmlContent()
 
 		// 监听来自 WebView 的消息
 		webviewView.webview.onDidReceiveMessage(
-			async message => {
+			async (message) => {
 				switch (message.command) {
 					case 'selectPdf':
-						await this._selectFile();
-						break;
+						await this._selectFile()
+						break
 					case 'selectFile':
-						await this._selectFileFromList(message.fileId);
-						break;
+						await this._selectFileFromList(message.fileId)
+						break
 					case 'selectChapter':
-						await this._selectChapter(message.chapterId);
-						break;
+						await this._selectChapter(message.chapterId)
+						break
 					case 'removeFile':
-						this._removeFile(message.fileId);
-						break;
+						this._removeFile(message.fileId)
+						break
 					case 'loadPastedContent':
-						await this._loadPastedContent(message.content);
-						break;
-				case 'setOpacity':
-					this._setOpacity(message.value);
-					break;
-				case 'getOpacity':
-					this._sendOpacityToView();
-					break;
-				case 'cleanupMissingFiles':
-					this._cleanupMissingFiles();
-					break;
+						await this._loadPastedContent(message.content)
+						break
+					case 'setOpacity':
+						this._setOpacity(message.value)
+						break
+					case 'getOpacity':
+						this._sendOpacityToView()
+						break
+					case 'cleanupMissingFiles':
+						this._cleanupMissingFiles()
+						break
 				}
 			},
 			undefined,
 			this._context.subscriptions
-		);
+		)
 
 		// 注册键盘快捷键
-		this._registerKeyBindings();
+		this._registerKeyBindings()
 	}
 
 	/**
 	 * 获取 WebView 的 HTML 内容
 	 */
 	_getHtmlContent() {
-		const fileListHtml = this._files.map(file => {
-			let statusIcon = '';
-			let statusText = '';
-			const isDisabled = file.status === 'missing' || file.status === 'error';
-			
-			if (file.status === 'missing') {
-				statusIcon = '⚠️ ';
-				statusText = ' <span style="color: var(--vscode-errorForeground);">(文件不存在)</span>';
-			} else if (file.status === 'error') {
-				statusIcon = '⚠️ ';
-				statusText = ' <span style="color: var(--vscode-errorForeground);">(解析失败)</span>';
-			}
-			
-			return `
+		const fileListHtml = this._files
+			.map((file) => {
+				let statusIcon = ''
+				let statusText = ''
+				const isDisabled = file.status === 'missing' || file.status === 'error'
+
+				if (file.status === 'missing') {
+					statusIcon = '⚠️ '
+					statusText = ' <span style="color: var(--vscode-errorForeground);">(文件不存在)</span>'
+				} else if (file.status === 'error') {
+					statusIcon = '⚠️ '
+					statusText = ' <span style="color: var(--vscode-errorForeground);">(解析失败)</span>'
+				}
+
+				return `
 				<div class="file-item ${this._currentFile && this._currentFile.id === file.id ? 'active' : ''} ${isDisabled ? 'disabled' : ''}" 
 				     data-file-id="${file.id}" 
 				     onclick="${isDisabled ? '' : `selectFile('${file.id}')`}"
@@ -2374,20 +2402,27 @@ class ThiefReaderWebviewProvider {
 						<button class="btn-remove" onclick="event.stopPropagation(); removeFile('${file.id}')">删除</button>
 					</div>
 				</div>
-			`;
-		}).join('');
+			`
+			})
+			.join('')
 
-		const chapterListHtml = this._currentFile && this._currentFile.chapters ? 
-			this._currentFile.chapters.map((chapter, index) => `
+		const chapterListHtml =
+			this._currentFile && this._currentFile.chapters
+				? this._currentFile.chapters
+						.map(
+							(chapter, index) => `
 				<div class="chapter-item ${this._currentChapter === index ? 'active' : ''}" data-chapter-id="${index}">
 					<div class="chapter-title" onclick="selectChapter(${index})">${chapter.title}</div>
 				</div>
-			`).join('') : '';
+			`
+						)
+						.join('')
+				: ''
 
 		// 区分「没选文件」和「选了文件但一章都没识别出来」，否则后者会误报成前者
 		const chapterEmptyHint = this._currentFile
 			? `未能从《${this._currentFile.name}》中识别出章节，请检查章节标题格式`
-			: '请先选择一个文件或粘贴文本内容';
+			: '请先选择一个文件或粘贴文本内容'
 
 		return `<!DOCTYPE html>
 		<html lang="zh-CN">
@@ -2743,7 +2778,7 @@ class ThiefReaderWebviewProvider {
 			}
 		</script>
 	</body>
-	</html>`;
+	</html>`
 	}
 
 	/**
@@ -2755,20 +2790,20 @@ class ThiefReaderWebviewProvider {
 				canSelectMany: false,
 				openLabel: '选择文件',
 				filters: {
-					'支持的文件': ['pdf', 'txt', 'epub'],
-					'PDF文件': ['pdf'],
-					'文本文件': ['txt'],
-					'EPUB电子书': ['epub'],
-					'所有文件': ['*']
+					支持的文件: ['pdf', 'txt', 'epub'],
+					PDF文件: ['pdf'],
+					文本文件: ['txt'],
+					EPUB电子书: ['epub'],
+					所有文件: ['*']
 				}
-			};
+			}
 
-			const fileUri = await vscode.window.showOpenDialog(options);
+			const fileUri = await vscode.window.showOpenDialog(options)
 			if (fileUri && fileUri[0]) {
-				await this._loadFile(fileUri[0]);
+				await this._loadFile(fileUri[0])
 			}
 		} catch (error) {
-			vscode.window.showErrorMessage(`选择文件失败: ${error.message}`);
+			vscode.window.showErrorMessage(`选择文件失败: ${error.message}`)
 		}
 	}
 
@@ -2777,39 +2812,39 @@ class ThiefReaderWebviewProvider {
 	 */
 	async _loadFile(fileUri) {
 		try {
-			const filePath = fileUri.fsPath;
-			const fileName = path.basename(filePath);
-			const fileExtension = path.extname(filePath).toLowerCase();
-			
-			this._statusBarItem.text = `reader: 正在解析 ${fileName}...`;
-			
-			let fileContent = '';
-			let pageCount = 1;
-			let chapters = [];
-			
+			const filePath = fileUri.fsPath
+			const fileName = path.basename(filePath)
+			const fileExtension = path.extname(filePath).toLowerCase()
+
+			this._statusBarItem.text = `reader: 正在解析 ${fileName}...`
+
+			let fileContent = ''
+			let pageCount = 1
+			let chapters = []
+
 			if (fileExtension === '.pdf') {
 				// 解析PDF文件
-				const fileBuffer = fs.readFileSync(filePath);
-				const pdfData = await pdf(fileBuffer);
-				fileContent = pdfData.text;
-				pageCount = pdfData.numpages;
-				chapters = this._extractChapters(fileContent);
+				const fileBuffer = fs.readFileSync(filePath)
+				const pdfData = await pdf(fileBuffer)
+				fileContent = pdfData.text
+				pageCount = pdfData.numpages
+				chapters = this._extractChapters(fileContent)
 			} else if (fileExtension === '.txt') {
 				// 解析TXT文件
-				fileContent = fs.readFileSync(filePath, 'utf8');
-				const lineCount = fileContent.split('\n').length;
-				pageCount = Math.ceil(lineCount / 50);
-				chapters = this._extractChapters(fileContent);
+				fileContent = fs.readFileSync(filePath, 'utf8')
+				const lineCount = fileContent.split('\n').length
+				pageCount = Math.ceil(lineCount / 50)
+				chapters = this._extractChapters(fileContent)
 			} else if (fileExtension === '.epub') {
 				// 解析EPUB文件
-				const epubData = await this._parseEpub(filePath);
-				fileContent = epubData.content;
-				chapters = epubData.chapters;
-				pageCount = chapters.length;
+				const epubData = await this._parseEpub(filePath)
+				fileContent = epubData.content
+				chapters = epubData.chapters
+				pageCount = chapters.length
 			} else {
-				throw new Error(`不支持的文件格式: ${fileExtension}`);
+				throw new Error(`不支持的文件格式: ${fileExtension}`)
 			}
-			
+
 			const fileInfo = {
 				id: Date.now().toString(),
 				name: fileName,
@@ -2825,58 +2860,56 @@ class ThiefReaderWebviewProvider {
 				lastReadTime: null,
 				// 初始化章节位置映射
 				chapterPositions: {}
-			};
+			}
 
 			// 检查是否已存在相同路径的文件（按路径检查，不是文件名）
-			const existingIndex = this._files.findIndex(f => f.path === filePath);
+			const existingIndex = this._files.findIndex((f) => f.path === filePath)
 			if (existingIndex !== -1) {
 				// 找到相同路径的文件，询问用户是否重新加载
-				const oldFile = this._files[existingIndex];
+				const oldFile = this._files[existingIndex]
 				const selection = await vscode.window.showInformationMessage(
 					`文件 "${fileName}" 已存在，是否重新加载？`,
 					{ modal: false },
 					'重新加载',
 					'取消'
-				);
-				
+				)
+
 				if (selection === '重新加载') {
 					// 用户选择重新加载，保留旧的阅读位置和ID
-					fileInfo.id = oldFile.id; // 保留原ID
-					fileInfo.lastChapter = oldFile.lastChapter;
-					fileInfo.lastScrollOffset = oldFile.lastScrollOffset;
-					fileInfo.lastReadTime = oldFile.lastReadTime;
-					fileInfo.chapterPositions = oldFile.chapterPositions || {};
-					
+					fileInfo.id = oldFile.id // 保留原ID
+					fileInfo.lastChapter = oldFile.lastChapter
+					fileInfo.lastScrollOffset = oldFile.lastScrollOffset
+					fileInfo.lastReadTime = oldFile.lastReadTime
+					fileInfo.chapterPositions = oldFile.chapterPositions || {}
+
 					// 验证章节索引是否仍然有效
 					if (fileInfo.lastChapter !== null && fileInfo.lastChapter >= fileInfo.chapters.length) {
-						fileInfo.lastChapter = 0;
-						fileInfo.lastScrollOffset = 0;
-						vscode.window.showInformationMessage(
-							`文件内容已变化，阅读位置已重置到开头`
-						);
+						fileInfo.lastChapter = 0
+						fileInfo.lastScrollOffset = 0
+						vscode.window.showInformationMessage(`文件内容已变化，阅读位置已重置到开头`)
 					}
-					
-					this._files[existingIndex] = fileInfo;
-					this._statusBarItem.text = `reader: 已重新加载 ${fileName}`;
-					vscode.window.showInformationMessage(`成功重新加载${fileInfo.type}文件: ${fileName}`);
+
+					this._files[existingIndex] = fileInfo
+					this._statusBarItem.text = `reader: 已重新加载 ${fileName}`
+					vscode.window.showInformationMessage(`成功重新加载${fileInfo.type}文件: ${fileName}`)
 				} else {
 					// 用户取消，不做任何操作
-					this._statusBarItem.text = `reader: 取消加载`;
-					return;
+					this._statusBarItem.text = `reader: 取消加载`
+					return
 				}
 			} else {
 				// 新文件，直接添加
-				this._files.push(fileInfo);
-				this._statusBarItem.text = `reader: 已加载 ${fileName}`;
-				vscode.window.showInformationMessage(`成功加载${fileInfo.type}文件: ${fileName}`);
+				this._files.push(fileInfo)
+				this._statusBarItem.text = `reader: 已加载 ${fileName}`
+				vscode.window.showInformationMessage(`成功加载${fileInfo.type}文件: ${fileName}`)
 			}
-			
+
 			// 加载完直接选中，否则章节列表要等用户再点一次文件名才出现
 			// （内部已包含 _saveCurrentState + _refreshView）
-			await this._selectFileFromList(fileInfo.id);
+			await this._selectFileFromList(fileInfo.id)
 		} catch (error) {
-			this._statusBarItem.text = "reader: 加载失败";
-			vscode.window.showErrorMessage(`加载文件失败: ${error.message}`);
+			this._statusBarItem.text = 'reader: 加载失败'
+			vscode.window.showErrorMessage(`加载文件失败: ${error.message}`)
 		}
 	}
 
@@ -2885,148 +2918,153 @@ class ThiefReaderWebviewProvider {
 	 */
 	async _parseEpub(filePath) {
 		return new Promise((resolve, reject) => {
-			const epub = new EPub(filePath);
-			
+			const epub = new EPub(filePath)
+
 			epub.on('error', (err) => {
-				reject(new Error(`EPUB解析错误: ${err.message}`));
-			});
-			
+				reject(new Error(`EPUB解析错误: ${err.message}`))
+			})
+
 			epub.on('end', async () => {
 				try {
-					const chapters = [];
-					let fullContent = '';
-					
+					const chapters = []
+					let fullContent = ''
+
 					// 获取EPUB的章节流
-					const flow = epub.flow;
-					
+					const flow = epub.flow
+
 					// 遍历所有章节
 					for (let i = 0; i < flow.length; i++) {
-						const chapterId = flow[i].id;
-						
+						const chapterId = flow[i].id
+
 						try {
 							// 获取章节内容
 							const chapterData = await new Promise((resolveChapter, rejectChapter) => {
 								epub.getChapter(chapterId, (error, text) => {
 									if (error) {
-										rejectChapter(error);
+										rejectChapter(error)
 									} else {
-										resolveChapter(text);
+										resolveChapter(text)
 									}
-								});
-							});
-							
+								})
+							})
+
 							// 移除HTML标签，提取纯文本
-							const textContent = this._stripHtml(chapterData);
-							
+							const textContent = this._stripHtml(chapterData)
+
 							if (textContent.trim().length > 0) {
 								chapters.push({
 									title: flow[i].title || `章节 ${i + 1}`,
 									startLine: 0,
-									content: textContent.split('\n').filter(line => line.trim().length > 0)
-								});
-								
-								fullContent += textContent + '\n';
+									content: textContent.split('\n').filter((line) => line.trim().length > 0)
+								})
+
+								fullContent += textContent + '\n'
 							}
 						} catch (chapterError) {
-							console.warn(`跳过章节 ${chapterId}:`, chapterError);
+							console.warn(`跳过章节 ${chapterId}:`, chapterError)
 						}
 					}
-					
+
 					resolve({
 						content: fullContent,
-						chapters: chapters.length > 0 ? chapters : [{
-							title: '全文内容',
-							startLine: 0,
-							content: fullContent.split('\n').filter(line => line.trim().length > 0)
-						}]
-					});
+						chapters:
+							chapters.length > 0
+								? chapters
+								: [
+										{
+											title: '全文内容',
+											startLine: 0,
+											content: fullContent.split('\n').filter((line) => line.trim().length > 0)
+										}
+									]
+					})
 				} catch (error) {
-					reject(error);
+					reject(error)
 				}
-			});
-			
+			})
+
 			// 开始解析
-			epub.parse();
-		});
+			epub.parse()
+		})
 	}
-	
+
 	/**
 	 * 移除HTML标签，提取纯文本（加强图片过滤）
 	 */
 	_stripHtml(html) {
 		// 移除script和style标签及其内容
-		let text = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-		text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
-		
+		let text = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+		text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+
 		// === 加强图片内容过滤 ===
-		
+
 		// 1. 移除img标签（包括所有属性）
-		text = text.replace(/<img[^>]*\/?>/gi, '');
-		
+		text = text.replace(/<img[^>]*\/?>/gi, '')
+
 		// 2. 移除svg标签及其内容（矢量图形）
-		text = text.replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, '');
-	    
+		text = text.replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, '')
+
 		// 3. 移除figure标签及其内容（通常包含图片和图注）
-		text = text.replace(/<figure\b[^<]*(?:(?!<\/figure>)<[^<]*)*<\/figure>/gi, '');
-		
+		text = text.replace(/<figure\b[^<]*(?:(?!<\/figure>)<[^<]*)*<\/figure>/gi, '')
+
 		// 4. 移除picture标签及其内容（响应式图片）
-		text = text.replace(/<picture\b[^<]*(?:(?!<\/picture>)<[^<]*)*<\/picture>/gi, '');
-		
+		text = text.replace(/<picture\b[^<]*(?:(?!<\/picture>)<[^<]*)*<\/picture>/gi, '')
+
 		// 5. 移除canvas标签及其内容（画布元素）
-		text = text.replace(/<canvas\b[^<]*(?:(?!<\/canvas>)<[^<]*)*<\/canvas>/gi, '');
-		
+		text = text.replace(/<canvas\b[^<]*(?:(?!<\/canvas>)<[^<]*)*<\/canvas>/gi, '')
+
 		// 6. 移除video标签及其内容（视频）
-		text = text.replace(/<video\b[^<]*(?:(?!<\/video>)<[^<]*)*<\/video>/gi, '');
-		
+		text = text.replace(/<video\b[^<]*(?:(?!<\/video>)<[^<]*)*<\/video>/gi, '')
+
 		// 7. 移除audio标签及其内容（音频）
-		text = text.replace(/<audio\b[^<]*(?:(?!<\/audio>)<[^<]*)*<\/audio>/gi, '');
-		
+		text = text.replace(/<audio\b[^<]*(?:(?!<\/audio>)<[^<]*)*<\/audio>/gi, '')
+
 		// 8. 移除embed标签（嵌入内容）
-		text = text.replace(/<embed[^>]*\/?>/gi, '');
-		
+		text = text.replace(/<embed[^>]*\/?>/gi, '')
+
 		// 9. 移除object标签及其内容（嵌入对象）
-		text = text.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
-		
+		text = text.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
+
 		// 10. 移除iframe标签及其内容（内嵌框架）
-		text = text.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
-		
+		text = text.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+
 		// 11. 移除base64编码的图片数据
-		text = text.replace(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/gi, '');
-		
+		text = text.replace(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/gi, '')
+
 		// 12. 移除可能残留的图片URL（http/https开头的图片链接）
-		text = text.replace(/https?:\/\/[^\s<>"]+\.(jpg|jpeg|png|gif|bmp|webp|svg|ico)/gi, '');
-		
+		text = text.replace(/https?:\/\/[^\s<>"]+\.(jpg|jpeg|png|gif|bmp|webp|svg|ico)/gi, '')
+
 		// === 正常的HTML处理 ===
-		
+
 		// 替换常见的HTML标签为换行或空格
-		text = text.replace(/<br\s*\/?>/gi, '\n');
-		text = text.replace(/<\/p>/gi, '\n\n');
-		text = text.replace(/<\/div>/gi, '\n');
-		text = text.replace(/<\/h[1-6]>/gi, '\n\n');
-		text = text.replace(/<\/li>/gi, '\n');
-		text = text.replace(/<\/tr>/gi, '\n');
-		
+		text = text.replace(/<br\s*\/?>/gi, '\n')
+		text = text.replace(/<\/p>/gi, '\n\n')
+		text = text.replace(/<\/div>/gi, '\n')
+		text = text.replace(/<\/h[1-6]>/gi, '\n\n')
+		text = text.replace(/<\/li>/gi, '\n')
+		text = text.replace(/<\/tr>/gi, '\n')
+
 		// 移除所有剩余的HTML标签
-		text = text.replace(/<[^>]+>/g, '');
-		
+		text = text.replace(/<[^>]+>/g, '')
+
 		// 解码HTML实体
-		text = text.replace(/&nbsp;/g, ' ');
-		text = text.replace(/&lt;/g, '<');
-		text = text.replace(/&gt;/g, '>');
-		text = text.replace(/&amp;/g, '&');
-		text = text.replace(/&quot;/g, '"');
-		text = text.replace(/&#39;/g, "'");
-		text = text.replace(/&#8217;/g, "'"); // 右单引号
-		text = text.replace(/&#8220;/g, '"'); // 左双引号
-		text = text.replace(/&#8221;/g, '"'); // 右双引号
-		text = text.replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec)); // 其他数字实体
-		
+		text = text.replace(/&nbsp;/g, ' ')
+		text = text.replace(/&lt;/g, '<')
+		text = text.replace(/&gt;/g, '>')
+		text = text.replace(/&amp;/g, '&')
+		text = text.replace(/&quot;/g, '"')
+		text = text.replace(/&#39;/g, "'")
+		text = text.replace(/&#8217;/g, "'") // 右单引号
+		text = text.replace(/&#8220;/g, '"') // 左双引号
+		text = text.replace(/&#8221;/g, '"') // 右双引号
+		text = text.replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec)) // 其他数字实体
+
 		// 清理多余的空白
-		text = text.replace(/\n\s*\n\s*\n/g, '\n\n');
-		text = text.replace(/[ \t]+/g, ' '); // 合并多个空格
-		text = text.trim();
-		
-		return text;
+		text = text.replace(/\n\s*\n\s*\n/g, '\n\n')
+		text = text.replace(/[ \t]+/g, ' ') // 合并多个空格
+		text = text.trim()
+
+		return text
 	}
 
 	/**
@@ -3034,13 +3072,13 @@ class ThiefReaderWebviewProvider {
 	 */
 	async _loadPastedContent(content) {
 		try {
-			this._statusBarItem.text = "reader: 正在解析粘贴内容...";
-			
+			this._statusBarItem.text = 'reader: 正在解析粘贴内容...'
+
 			// 解析章节
-			const chapters = this._extractChaptersWithFallback(content);
-			
+			const chapters = this._extractChaptersWithFallback(content)
+
 			// 生成友好的文件名
-			const fileName = this._generatePasteFileName(content);
+			const fileName = this._generatePasteFileName(content)
 			const fileInfo = {
 				id: Date.now().toString(),
 				name: fileName,
@@ -3056,28 +3094,28 @@ class ThiefReaderWebviewProvider {
 				lastReadTime: null,
 				// 初始化章节位置映射
 				chapterPositions: {}
-			};
+			}
 
 			// 添加到文件列表
-			this._files.push(fileInfo);
-			
-			// 自动选中这个文件
-			this._currentFile = fileInfo;
-			this._currentChapter = chapters.length > 0 ? 0 : null;
-			this._currentPage = 0;
-			this._scrollOffset = 0;
+			this._files.push(fileInfo)
 
-			this._statusBarItem.text = `reader: 已加载粘贴内容`;
-			vscode.window.showInformationMessage(`成功加载粘贴内容，共${chapters.length}个章节`);
-			
+			// 自动选中这个文件
+			this._currentFile = fileInfo
+			this._currentChapter = chapters.length > 0 ? 0 : null
+			this._currentPage = 0
+			this._scrollOffset = 0
+
+			this._statusBarItem.text = `reader: 已加载粘贴内容`
+			vscode.window.showInformationMessage(`成功加载粘贴内容，共${chapters.length}个章节`)
+
 			// 保存状态
-			this._saveCurrentState();
-			
+			this._saveCurrentState()
+
 			// 刷新界面
-			this._refreshView();
+			this._refreshView()
 		} catch (error) {
-			this._statusBarItem.text = "reader: 加载失败";
-			vscode.window.showErrorMessage(`加载粘贴内容失败: ${error.message}`);
+			this._statusBarItem.text = 'reader: 加载失败'
+			vscode.window.showErrorMessage(`加载粘贴内容失败: ${error.message}`)
 		}
 	}
 
@@ -3086,100 +3124,100 @@ class ThiefReaderWebviewProvider {
 	 */
 	_extractChaptersWithFallback(text) {
 		// 先尝试正常的章节提取
-		const chapters = this._extractChapters(text);
-		
+		const chapters = this._extractChapters(text)
+
 		// 如果成功提取到章节，直接返回
 		if (chapters.length > 0) {
-			return chapters;
+			return chapters
 		}
-		
+
 		// 如果没有识别出章节，使用 Fallback 方案
 		// 按段落分割，每段用前10个字作为标题
-		return this._createFallbackChapters(text);
+		return this._createFallbackChapters(text)
 	}
 
 	/**
 	 * 创建备用章节（使用前10个字作为标题）
 	 */
 	_createFallbackChapters(text) {
-		const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-		const chapters = [];
-		
+		const paragraphs = text.split(/\n\s*\n/).filter((p) => p.trim().length > 0)
+		const chapters = []
+
 		if (paragraphs.length === 0) {
 			// 如果连段落都没有，按整行分割
-			const lines = text.split('\n').filter(line => line.trim().length > 0);
-			
+			const lines = text.split('\n').filter((line) => line.trim().length > 0)
+
 			if (lines.length === 0) {
 				// 场景1：完全空内容
-				const cleanContent = text.trim().replace(/\s+/g, ' ');
+				const cleanContent = text.trim().replace(/\s+/g, ' ')
 				if (cleanContent.length === 0) {
 					// 空内容
 					chapters.push({
 						title: '（空内容）',
 						startLine: 0,
 						content: []
-					});
+					})
 				} else {
 					// 有内容但太短（小于10个字符）
-					const title = cleanContent.substring(0, 10);
+					const title = cleanContent.substring(0, 10)
 					chapters.push({
 						title: title || '（空内容）',
 						startLine: 0,
 						content: [cleanContent]
-					});
+					})
 				}
 			} else {
 				// 场景2：有行但没有段落分隔符
 				lines.forEach((line) => {
-					const trimmedLine = line.trim();
+					const trimmedLine = line.trim()
 					// 取前10个字符作为标题
-					const title = trimmedLine.substring(0, 10) + (trimmedLine.length > 10 ? '...' : '');
-					
+					const title = trimmedLine.substring(0, 10) + (trimmedLine.length > 10 ? '...' : '')
+
 					chapters.push({
 						title: title || '（无标题）',
 						startLine: 0,
 						content: [trimmedLine]
-					});
-				});
+					})
+				})
 			}
 		} else {
 			// 场景3：有段落分隔符，按段落分割
 			paragraphs.forEach((paragraph) => {
-				const lines = paragraph.split('\n').filter(line => line.trim().length > 0);
+				const lines = paragraph.split('\n').filter((line) => line.trim().length > 0)
 				if (lines.length > 0) {
-					const firstLine = lines[0].trim();
+					const firstLine = lines[0].trim()
 					// 取前10个字符作为标题
-					const title = firstLine.substring(0, 10) + (firstLine.length > 10 ? '...' : '');
-					
+					const title = firstLine.substring(0, 10) + (firstLine.length > 10 ? '...' : '')
+
 					chapters.push({
 						title: title || '（无标题）',
 						startLine: 0,
 						content: lines
-					});
+					})
 				}
-			});
+			})
 		}
-		
+
 		// 最终兜底：确保至少有一个章节
 		if (chapters.length === 0) {
 			chapters.push({
 				title: '（空内容）',
 				startLine: 0,
 				content: []
-			});
+			})
 		}
-		
-		return chapters;
+
+		return chapters
 	}
 
 	/**
 	 * 提取章节信息
 	 */
 	_extractChapters(text) {
-		const chapters = [];
-		const lines = text.split('\n');
-		let currentChapter = null;
-		let chapterIndex = 0;
+		const chapters = []
+		const lines = text.split('\n')
+		let currentChapter = null
+		let chapterIndex = 0
 
 		// 扩展的章节检测规则，适用于PDF和TXT
 		const chapterPatterns = [
@@ -3189,42 +3227,42 @@ class ThiefReaderWebviewProvider {
 			/^[一二三四五六七八九十]+、\s*(.+)/,
 			/^[\d]+\.\s*(.+)/,
 			/^[\d]+[\s]*[、．.]\s*(.+)/,
-			
+
 			// 英文章节模式
 			/^Chapter\s+\d+\s*[:\-]?\s*(.+)/i,
 			/^CHAPTER\s+\d+\s*[:\-]?\s*(.+)/i,
-			
+
 			// 标题模式（适用于TXT文件）
-			/^={3,}\s*(.+)\s*={3,}/,  // ===标题===
-			/^-{3,}\s*(.+)\s*-{3,}/,  // ---标题---
+			/^={3,}\s*(.+)\s*={3,}/, // ===标题===
+			/^-{3,}\s*(.+)\s*-{3,}/, // ---标题---
 			/^\*{3,}\s*(.+)\s*\*{3,}/, // ***标题***
-			
+
 			// 简单的标题模式
-			/^【(.+)】$/,  // 【标题】
-			/^《(.+)》$/,  // 《标题》
-			
+			/^【(.+)】$/, // 【标题】
+			/^《(.+)》$/, // 《标题》
+
 			// 数字编号
 			/^(\d+)\s*[、．.]\s*(.+)/,
 			/^(\d+)\s+(.+)/
-		];
+		]
 
 		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i].trim();
-			if (!line) continue;
+			const line = lines[i].trim()
+			if (!line) continue
 
 			// 检查是否匹配章节模式
-			let isChapter = false;
-			let chapterTitle = '';
+			let isChapter = false
+			let chapterTitle = ''
 
 			for (const pattern of chapterPatterns) {
-				const match = line.match(pattern);
+				const match = line.match(pattern)
 				if (match) {
-					isChapter = true;
+					isChapter = true
 					// 取最后一个捕获组作为标题，如果没有则取整行
-					chapterTitle = match[match.length - 1] || match[0];
+					chapterTitle = match[match.length - 1] || match[0]
 					// 清理标题中的多余空格和符号
-					chapterTitle = chapterTitle.replace(/^\s*[：:\-]\s*/, '').trim();
-					break;
+					chapterTitle = chapterTitle.replace(/^\s*[：:\-]\s*/, '').trim()
+					break
 				}
 			}
 
@@ -3232,20 +3270,20 @@ class ThiefReaderWebviewProvider {
 			if (!isChapter && line.length > 2 && line.length < 50) {
 				// 检查是否全部是大写字母（可能是英文标题）
 				if (/^[A-Z\s\d\-_]+$/.test(line)) {
-					isChapter = true;
-					chapterTitle = line;
+					isChapter = true
+					chapterTitle = line
 				}
 				// 检查是否包含常见的标题关键词
 				else if (/^(序言|前言|引言|结语|附录|目录|索引|参考文献|致谢)/i.test(line)) {
-					isChapter = true;
-					chapterTitle = line;
+					isChapter = true
+					chapterTitle = line
 				}
 			}
 
 			if (isChapter) {
 				// 保存上一章节
 				if (currentChapter) {
-					chapters.push(currentChapter);
+					chapters.push(currentChapter)
 				}
 
 				// 开始新章节
@@ -3253,121 +3291,117 @@ class ThiefReaderWebviewProvider {
 					title: chapterTitle,
 					startLine: i,
 					content: []
-				};
-				chapterIndex++;
+				}
+				chapterIndex++
 			} else if (currentChapter && line.length > 5) {
 				// 添加内容到当前章节（降低最小长度要求）
-				currentChapter.content.push(line);
+				currentChapter.content.push(line)
 			}
 		}
 
 		// 添加最后一个章节
 		if (currentChapter) {
-			chapters.push(currentChapter);
+			chapters.push(currentChapter)
 		}
 
 		// 如果没有检测到章节，返回空数组
 		// 让调用者使用 _extractChaptersWithFallback 来处理
-		return chapters;
+		return chapters
 	}
 
 	/**
 	 * 从列表中选择文件
 	 */
 	async _selectFileFromList(fileId) {
-		const file = this._files.find(f => f.id === fileId);
-		if (!file) return;
-		
+		const file = this._files.find((f) => f.id === fileId)
+		if (!file) return
+
 		// 检查文件状态
 		if (file.status === 'missing') {
-			vscode.window.showWarningMessage(
-				`文件 "${file.name}" 已不存在，无法打开`
-			);
-			return;
+			vscode.window.showWarningMessage(`文件 "${file.name}" 已不存在，无法打开`)
+			return
 		}
-		
+
 		if (file.status === 'error') {
-			vscode.window.showWarningMessage(
-				`文件 "${file.name}" 解析失败，无法打开`
-			);
-			return;
+			vscode.window.showWarningMessage(`文件 "${file.name}" 解析失败，无法打开`)
+			return
 		}
-		
+
 		// 步骤1：保存当前文件的阅读位置
 		if (this._currentFile && this._currentFile.id !== fileId) {
-			this._saveFileReadingPosition(this._currentFile.id);
+			this._saveFileReadingPosition(this._currentFile.id)
 		}
-		
+
 		// 步骤2：切换到新文件
-		this._currentFile = file;
-		
+		this._currentFile = file
+
 		// 步骤3：恢复新文件的阅读位置
-		this._restoreFileReadingPosition(file);
-		
+		this._restoreFileReadingPosition(file)
+
 		// 步骤4：显示内容
 		if (this._currentChapter !== null && file.chapters && file.chapters.length > 0) {
-			const chapter = file.chapters[this._currentChapter];
-			this._displayChapterText(chapter);
+			const chapter = file.chapters[this._currentChapter]
+			this._displayChapterText(chapter)
 			// _displayChapterText 已经设置了完整的状态栏文本（包括章节标题、滚动位置、具体文字）
-			
+
 			// 步骤5：切换文件时自动隐藏章节预览弹窗（在更新显示后）
 			if (this._floatingWindowManager.isVisible()) {
-				this._floatingWindowManager.hide();
+				this._floatingWindowManager.hide()
 				// 隐藏弹窗后立即刷新状态栏，确保图标正确更新为📖
 				setTimeout(() => {
-					this._displayChapterText(chapter);
-				}, 50);
+					this._displayChapterText(chapter)
+				}, 50)
 			}
 		} else {
-			this._statusBarItem.text = `reader: 已选择 ${file.name} [${file.type}]`;
-			
+			this._statusBarItem.text = `reader: 已选择 ${file.name} [${file.type}]`
+
 			// 如果没有章节内容，也要隐藏弹窗
 			if (this._floatingWindowManager.isVisible()) {
-				this._floatingWindowManager.hide();
+				this._floatingWindowManager.hide()
 			}
 		}
-		
+
 		// 步骤6：保存状态并刷新界面
-		this._saveCurrentState();
-		this._refreshView();
+		this._saveCurrentState()
+		this._refreshView()
 	}
 
 	/**
 	 * 选择章节
 	 */
 	async _selectChapter(chapterId) {
-		if (!this._currentFile || !this._currentFile.chapters) return;
+		if (!this._currentFile || !this._currentFile.chapters) return
 
-		const chapterIndex = parseInt(chapterId);
+		const chapterIndex = parseInt(chapterId)
 		if (chapterIndex >= 0 && chapterIndex < this._currentFile.chapters.length) {
 			// 步骤1：保存当前章节的滚动位置
 			if (this._currentChapter !== null && this._currentChapter !== chapterIndex) {
-				this._saveChapterPosition(this._currentChapter, this._scrollOffset);
+				this._saveChapterPosition(this._currentChapter, this._scrollOffset)
 			}
-			
+
 			// 步骤2：切换到新章节
-			this._currentChapter = chapterIndex;
-			this._currentPage = 0;
-			
+			this._currentChapter = chapterIndex
+			this._currentPage = 0
+
 			// 步骤3：恢复新章节的滚动位置
-			this._scrollOffset = this._getChapterPosition(chapterIndex);
-			
+			this._scrollOffset = this._getChapterPosition(chapterIndex)
+
 			// 步骤4：显示内容
-			const chapter = this._currentFile.chapters[chapterIndex];
-			this._displayChapterText(chapter);
-			this._saveCurrentState();
-			
+			const chapter = this._currentFile.chapters[chapterIndex]
+			this._displayChapterText(chapter)
+			this._saveCurrentState()
+
 			// 步骤5：切换章节时自动隐藏章节预览弹窗（在更新显示后）
 			if (this._floatingWindowManager.isVisible()) {
-				this._floatingWindowManager.hide();
+				this._floatingWindowManager.hide()
 				// 隐藏弹窗后立即刷新状态栏，确保图标正确更新为📖
 				setTimeout(() => {
-					this._displayChapterText(chapter);
-				}, 50);
+					this._displayChapterText(chapter)
+				}, 50)
 			}
-			
+
 			// 通过消息更新章节高亮，而不是刷新整个视图（避免滚动位置重置）
-			this._updateChapterHighlight(chapterIndex);
+			this._updateChapterHighlight(chapterIndex)
 		}
 	}
 
@@ -3379,7 +3413,7 @@ class ThiefReaderWebviewProvider {
 			this._view.webview.postMessage({
 				command: 'updateChapterHighlight',
 				chapterIndex: chapterIndex
-			});
+			})
 		}
 	}
 
@@ -3387,42 +3421,42 @@ class ThiefReaderWebviewProvider {
 	 * 显示章节文字 - 全局连续滑动，确保能看到所有字符
 	 */
 	_displayChapterText(chapter) {
-		if (!chapter || !chapter.content) return;
+		if (!chapter || !chapter.content) return
 
 		// 如果状态栏文字被隐藏，不更新内容
 		if (!this._statusBarVisible) {
-			return;
+			return
 		}
 
 		// 获取完整章节内容（不再分页）
-		const fullContent = chapter.content.join(' ');
-		const totalLength = fullContent.length;
-		
+		const fullContent = chapter.content.join(' ')
+		const totalLength = fullContent.length
+
 		// 一屏显示长度（可通过 lazyNovel.displayLength 调整）
-		const displayLength = this._displayLength;
-		
+		const displayLength = this._displayLength
+
 		// 计算最大偏移量：允许滑动到最后一个字符
 		// 让最后一个字符可以显示在窗口的开始位置
-		const maxScrollOffset = Math.max(0, totalLength - 1);
-		
+		const maxScrollOffset = Math.max(0, totalLength - 1)
+
 		// 确保偏移量在有效范围内
-		this._scrollOffset = Math.max(0, Math.min(this._scrollOffset, maxScrollOffset));
-		
+		this._scrollOffset = Math.max(0, Math.min(this._scrollOffset, maxScrollOffset))
+
 		// 从全局偏移量提取显示内容
 		// 如果接近末尾，可能显示不足displayLength个字符
-		const actualEndPos = Math.min(this._scrollOffset + displayLength, totalLength);
-		const displayContent = fullContent.substring(this._scrollOffset, actualEndPos);
-		
+		const actualEndPos = Math.min(this._scrollOffset + displayLength, totalLength)
+		const displayContent = fullContent.substring(this._scrollOffset, actualEndPos)
+
 		// 应用透明度到文本颜色
 		// 基础颜色：rgba(135,135,135,1)，根据透明度设置调整alpha值
-		const alpha = (this._opacity / 100).toFixed(2);
-		this._statusBarItem.color = `rgba(135, 135, 135, ${alpha})`;
+		const alpha = (this._opacity / 100).toFixed(2)
+		this._statusBarItem.color = `rgba(135, 135, 135, ${alpha})`
 
 		// 状态栏只显示正文本身，书名/章节/进度/预览状态全部挪到悬浮提示里
-		this._statusBarItem.text = displayContent;
-		this._statusBarItem.tooltip = this._buildTooltip(chapter, totalLength, actualEndPos);
+		this._statusBarItem.text = displayContent
+		this._statusBarItem.tooltip = this._buildTooltip(chapter, totalLength, actualEndPos)
 
-		console.log(`状态栏已更新: ${chapter.title} 偏移量${this._scrollOffset}`);
+		console.log(`状态栏已更新: ${chapter.title} 偏移量${this._scrollOffset}`)
 	}
 
 	/**
@@ -3431,45 +3465,45 @@ class ThiefReaderWebviewProvider {
 	_buildTooltip(chapter, totalLength, actualEndPos) {
 		const percent = totalLength > 0
 			? Math.round((actualEndPos / totalLength) * 100)
-			: 100;
-		const lines = [];
+			: 100
+		const lines = []
 
 		if (this._currentFile) {
-			lines.push(`《${this._currentFile.name}》`);
+			lines.push(`《${this._currentFile.name}》`)
 		}
-		lines.push(`章节：${chapter.title}`);
-		lines.push(`进度：${this._scrollOffset}-${actualEndPos} / ${totalLength} 字（${percent}%）`);
+		lines.push(`章节：${chapter.title}`)
+		lines.push(`进度：${this._scrollOffset}-${actualEndPos} / ${totalLength} 字（${percent}%）`)
 		if (this._floatingWindowManager.isVisible()) {
-			lines.push('章节预览：已打开');
+			lines.push('章节预览：已打开')
 		}
-		lines.push('', READING_SHORTCUT_HINT);
+		lines.push('', READING_SHORTCUT_HINT)
 
-		return lines.join('\n');
+		return lines.join('\n')
 	}
 
 	/**
 	 * 删除文件
 	 */
 	_removeFile(fileId) {
-		const index = this._files.findIndex(f => f.id === fileId);
+		const index = this._files.findIndex((f) => f.id === fileId)
 		if (index !== -1) {
-			const file = this._files[index];
-			const fileName = file.name;
-			const fileType = file.type;
-			this._files.splice(index, 1);
-			
+			const file = this._files[index]
+			const fileName = file.name
+			const fileType = file.type
+			this._files.splice(index, 1)
+
 			// 如果删除的是当前选中的文件，清空选择
 			if (this._currentFile && this._currentFile.id === fileId) {
-				this._currentFile = null;
-				this._currentChapter = null;
-				this._currentPage = 0;
-				this._scrollOffset = 0;
-				this._statusBarItem.text = "reader: 准备就绪";
+				this._currentFile = null
+				this._currentChapter = null
+				this._currentPage = 0
+				this._scrollOffset = 0
+				this._statusBarItem.text = 'reader: 准备就绪'
 			}
-			
-			vscode.window.showInformationMessage(`已删除${fileType}文件: ${fileName}`);
-			this._saveCurrentState();
-			this._refreshView();
+
+			vscode.window.showInformationMessage(`已删除${fileType}文件: ${fileName}`)
+			this._saveCurrentState()
+			this._refreshView()
 		}
 	}
 
@@ -3479,48 +3513,48 @@ class ThiefReaderWebviewProvider {
 	_registerKeyBindings() {
 		// 注册翻页命令 (Alt + Shift + 左右方向键)
 		const previousPageCommand = vscode.commands.registerCommand('lazyNovel.previousPage', () => {
-			this._previousPage();
-		});
+			this._previousPage()
+		})
 
 		const nextPageCommand = vscode.commands.registerCommand('lazyNovel.nextPage', () => {
-			this._nextPage();
-		});
+			this._nextPage()
+		})
 
 		// 注册滑动命令 (Alt + 左右方向键)
 		const scrollLeftCommand = vscode.commands.registerCommand('lazyNovel.scrollLeft', () => {
-			this._scrollLeft();
-		});
+			this._scrollLeft()
+		})
 
 		const scrollRightCommand = vscode.commands.registerCommand('lazyNovel.scrollRight', () => {
-			this._scrollRight();
-		});
+			this._scrollRight()
+		})
 
 		// 注册切换显示命令 (Shift + 空格键)
 		const toggleVisibilityCommand = vscode.commands.registerCommand('lazyNovel.toggleVisibility', () => {
-			this._toggleStatusBarVisibility();
-		});
+			this._toggleStatusBarVisibility()
+		})
 
 		this._context.subscriptions.push(
-			previousPageCommand, 
-			nextPageCommand, 
-			scrollLeftCommand, 
+			previousPageCommand,
+			nextPageCommand,
+			scrollLeftCommand,
 			scrollRightCommand,
 			toggleVisibilityCommand
-		);
+		)
 	}
 
 	/**
 	 * 上一页 (数字键 1) - 向前一屏，退到章首则回到上一章末尾
 	 */
 	_previousPage() {
-		this._turnPage(previousPagePosition, '已在全书开头');
+		this._turnPage(previousPagePosition, '已在全书开头')
 	}
 
 	/**
 	 * 下一页 (数字键 2) - 向后一屏，滚到章末则进入下一章
 	 */
 	_nextPage() {
-		this._turnPage(nextPagePosition, '已读到全书末尾');
+		this._turnPage(nextPagePosition, '已读到全书末尾')
 	}
 
 	/**
@@ -3531,36 +3565,36 @@ class ThiefReaderWebviewProvider {
 	 */
 	_turnPage(computePosition, boundaryMessage) {
 		if (this._currentChapter === null || !this._currentFile || !this._currentFile.chapters) {
-			return;
+			return
 		}
 
-		const chapters = this._currentFile.chapters;
-		const chapterLengths = chapters.map(chapter => chapter.content.join(' ').length);
+		const chapters = this._currentFile.chapters
+		const chapterLengths = chapters.map(chapter => chapter.content.join(' ').length)
 		// 翻页跨度跟显示长度保持一致，否则会漏字或重复
 		const position = computePosition(
 			this._currentChapter,
 			this._scrollOffset,
 			chapterLengths,
 			this._displayLength
-		);
+		)
 
 		if (!position) {
-			vscode.window.setStatusBarMessage(boundaryMessage, 1500);
-			return;
+			vscode.window.setStatusBarMessage(boundaryMessage, 1500)
+			return
 		}
 
 		// 跨章时先存好原章节的位置，再切换
 		if (position.chapterIndex !== this._currentChapter) {
-			this._saveChapterPosition(this._currentChapter, this._scrollOffset);
-			this._currentChapter = position.chapterIndex;
-			this._currentPage = 0;
-			this._updateChapterHighlight(position.chapterIndex);
+			this._saveChapterPosition(this._currentChapter, this._scrollOffset)
+			this._currentChapter = position.chapterIndex
+			this._currentPage = 0
+			this._updateChapterHighlight(position.chapterIndex)
 		}
 
-		this._scrollOffset = position.scrollOffset;
-		this._displayChapterText(chapters[this._currentChapter]);
-		this._saveChapterPosition(this._currentChapter, this._scrollOffset);
-		this._saveCurrentState();
+		this._scrollOffset = position.scrollOffset
+		this._displayChapterText(chapters[this._currentChapter])
+		this._saveChapterPosition(this._currentChapter, this._scrollOffset)
+		this._saveCurrentState()
 	}
 
 	/**
@@ -3568,15 +3602,15 @@ class ThiefReaderWebviewProvider {
 	 */
 	_scrollLeft() {
 		if (this._currentChapter !== null && this._currentFile) {
-			const scrollStep = 10; // 每次滑动10个字符
-			
+			const scrollStep = 10 // 每次滑动10个字符
+
 			if (this._scrollOffset > 0) {
-				this._scrollOffset = Math.max(0, this._scrollOffset - scrollStep);
-				const chapter = this._currentFile.chapters[this._currentChapter];
-				this._displayChapterText(chapter);
+				this._scrollOffset = Math.max(0, this._scrollOffset - scrollStep)
+				const chapter = this._currentFile.chapters[this._currentChapter]
+				this._displayChapterText(chapter)
 				// 保存当前章节位置
-				this._saveChapterPosition(this._currentChapter, this._scrollOffset);
-				this._saveCurrentState();
+				this._saveChapterPosition(this._currentChapter, this._scrollOffset)
+				this._saveCurrentState()
 			}
 		}
 	}
@@ -3586,17 +3620,17 @@ class ThiefReaderWebviewProvider {
 	 */
 	_scrollRight() {
 		if (this._currentChapter !== null && this._currentFile) {
-			const scrollStep = 10; // 每次滑动10个字符
-			const chapter = this._currentFile.chapters[this._currentChapter];
-			const fullContent = chapter.content.join(' ');
-			const maxScrollOffset = Math.max(0, fullContent.length - 1);
-			
+			const scrollStep = 10 // 每次滑动10个字符
+			const chapter = this._currentFile.chapters[this._currentChapter]
+			const fullContent = chapter.content.join(' ')
+			const maxScrollOffset = Math.max(0, fullContent.length - 1)
+
 			if (this._scrollOffset < maxScrollOffset) {
-				this._scrollOffset = Math.min(maxScrollOffset, this._scrollOffset + scrollStep);
-				this._displayChapterText(chapter);
+				this._scrollOffset = Math.min(maxScrollOffset, this._scrollOffset + scrollStep)
+				this._displayChapterText(chapter)
 				// 保存当前章节位置
-				this._saveChapterPosition(this._currentChapter, this._scrollOffset);
-				this._saveCurrentState();
+				this._saveChapterPosition(this._currentChapter, this._scrollOffset)
+				this._saveCurrentState()
 			}
 		}
 	}
@@ -3606,7 +3640,7 @@ class ThiefReaderWebviewProvider {
 	 */
 	_toggleStatusBarVisibility() {
 		// 新功能：切换章节预览显示
-		this.toggleChapterPreview();
+		this.toggleChapterPreview()
 	}
 
 	/**
@@ -3615,13 +3649,13 @@ class ThiefReaderWebviewProvider {
 	 */
 	_setOpacity(value) {
 		// 确保值在有效范围内
-		this._opacity = Math.max(5, Math.min(100, value));
-		
+		this._opacity = Math.max(5, Math.min(100, value))
+
 		// 更新状态栏的背景颜色（通过设置color属性的透明度）
-		this._applyOpacityToStatusBar();
-		
+		this._applyOpacityToStatusBar()
+
 		// 保存设置到VS Code配置
-		vscode.workspace.getConfiguration('lazyNovel').update('statusBarOpacity', this._opacity, true);
+		vscode.workspace.getConfiguration('lazyNovel').update('statusBarOpacity', this._opacity, true)
 	}
 
 	/**
@@ -3629,8 +3663,8 @@ class ThiefReaderWebviewProvider {
 	 */
 	_applyOpacityToStatusBar() {
 		if (this._statusBarItem && this._currentChapter !== null && this._currentFile) {
-			const chapter = this._currentFile.chapters[this._currentChapter];
-			this._displayChapterText(chapter);
+			const chapter = this._currentFile.chapters[this._currentChapter]
+			this._displayChapterText(chapter)
 		}
 	}
 
@@ -3642,7 +3676,7 @@ class ThiefReaderWebviewProvider {
 			this._view.webview.postMessage({
 				command: 'setOpacity',
 				value: this._opacity
-			});
+			})
 		}
 	}
 
@@ -3650,10 +3684,10 @@ class ThiefReaderWebviewProvider {
 	 * 从配置中加载透明度
 	 */
 	_loadOpacity() {
-		const config = vscode.workspace.getConfiguration('lazyNovel');
-		const savedOpacity = config.get('statusBarOpacity');
+		const config = vscode.workspace.getConfiguration('lazyNovel')
+		const savedOpacity = config.get('statusBarOpacity')
 		if (savedOpacity !== undefined) {
-			this._opacity = savedOpacity;
+			this._opacity = savedOpacity
 		}
 	}
 
@@ -3661,10 +3695,10 @@ class ThiefReaderWebviewProvider {
 	 * 从配置中加载状态栏一屏显示的字符数
 	 */
 	_loadDisplayLength() {
-		const savedLength = vscode.workspace.getConfiguration('lazyNovel').get('displayLength');
+		const savedLength = vscode.workspace.getConfiguration('lazyNovel').get('displayLength')
 		this._displayLength = Number.isFinite(savedLength) && savedLength > 0
 			? savedLength
-			: DEFAULT_DISPLAY_LENGTH;
+			: DEFAULT_DISPLAY_LENGTH
 	}
 
 	/**
@@ -3672,7 +3706,7 @@ class ThiefReaderWebviewProvider {
 	 */
 	_refreshView() {
 		if (this._view) {
-			this._view.webview.html = this._getHtmlContent();
+			this._view.webview.html = this._getHtmlContent()
 		}
 	}
 }
@@ -3686,45 +3720,43 @@ class ThiefReaderWebviewProvider {
 function activate(context) {
 	// 使用控制台输出诊断信息 (console.log) 和错误 (console.error)
 	// 这行代码只会在扩展激活时执行一次
-	console.log('恭喜，您的扩展 "Lazy Novel" 现在已激活！');
+	console.log('恭喜，您的扩展 "Lazy Novel" 现在已激活！')
 
 	// 创建 WebView 提供者
-	const provider = new ThiefReaderWebviewProvider(context);
+	const provider = new ThiefReaderWebviewProvider(context)
 
 	// 注册 WebView 提供者
-	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider('lazy-novel-main', provider)
-	);
+	context.subscriptions.push(vscode.window.registerWebviewViewProvider('lazy-novel-main', provider))
 
 	// 章节预览功能的切换命令
 	const toggleChapterPreviewCommand = vscode.commands.registerCommand('lazyNovel.toggleChapterPreview', function () {
-		provider.toggleChapterPreview();
-	});
+		provider.toggleChapterPreview()
+	})
 
 	const showHoverPreviewCommand = vscode.commands.registerCommand('lazyNovel.showHoverPreview', function () {
 		// 直接显示悬停预览（用于测试）
 		if (provider._currentFile && provider._currentChapter !== null) {
-			const content = provider._mouseEventListener._getCurrentReaderContent();
+			const content = provider._mouseEventListener._getCurrentReaderContent()
 			if (content) {
-				provider._floatingWindowManager.showAt(content);
-				vscode.window.showInformationMessage('悬停预览已显示');
+				provider._floatingWindowManager.showAt(content)
+				vscode.window.showInformationMessage('悬停预览已显示')
 			} else {
-				vscode.window.showWarningMessage('没有可预览的内容');
+				vscode.window.showWarningMessage('没有可预览的内容')
 			}
 		} else {
-			vscode.window.showWarningMessage('请先加载文件');
+			vscode.window.showWarningMessage('请先加载文件')
 		}
-	});
+	})
 
 	const hideHoverPreviewCommand = vscode.commands.registerCommand('lazyNovel.hideHoverPreview', function () {
 		// 隐藏悬停预览
-		provider._floatingWindowManager.hide();
-		vscode.window.showInformationMessage('悬停预览已隐藏');
-	});
+		provider._floatingWindowManager.hide()
+		vscode.window.showInformationMessage('悬停预览已隐藏')
+	})
 
-	context.subscriptions.push(toggleChapterPreviewCommand);
-	context.subscriptions.push(showHoverPreviewCommand);
-	context.subscriptions.push(hideHoverPreviewCommand);
+	context.subscriptions.push(toggleChapterPreviewCommand)
+	context.subscriptions.push(showHoverPreviewCommand)
+	context.subscriptions.push(hideHoverPreviewCommand)
 }
 
 // 当您的扩展被停用时调用此方法

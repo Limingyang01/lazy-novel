@@ -5,7 +5,8 @@ const path = require('path');
 // 直接从 extension.js 取 chapterPatterns 求值，避免测试里复制一份正则后失同步
 function loadChapterPatterns() {
 	const source = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-	const match = source.match(/const chapterPatterns = (\[[\s\S]*?\n\t\t\]);/);
+	// 行尾分号可有可无：源码风格变动过，别让测试跟着一起挂
+	const match = source.match(/const chapterPatterns = (\[[\s\S]*?\n\t\t\]);?/);
 	assert.ok(match, '未能在 extension.js 中定位 chapterPatterns');
 	return new Function(`return ${match[1]}`)();
 }

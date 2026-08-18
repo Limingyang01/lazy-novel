@@ -3,9 +3,9 @@
   "displayName": "Lazy Novel",
   "description": "基于状态栏隐蔽阅读的 VSCode 插件，支持 PDF/TXT/EPUB，带书库与主题管理（详见 spec 2/3）",
   "version": "0.1.0",
-  "publisher": "neroneroffy",
+  "publisher": "buding",
   "icon": "main-icon.png",
-  "repository": "https://github.com/neroneroffy/thief-reader",
+  "repository": "https://github.com/neroneroffy/lazy-novel",
   "author": {
     "name": "neroneroffy",
     "url": "https://github.com/neroneroffy"
@@ -28,6 +28,17 @@
     "Other"
   ],
   "main": "./extension.js",
+  "activationEvents": [
+    "onCommand:lazyNovel.previousPage",
+    "onCommand:lazyNovel.nextPage",
+    "onCommand:lazyNovel.scrollLeft",
+    "onCommand:lazyNovel.scrollRight",
+    "onCommand:lazyNovel.toggleVisibility",
+    "onCommand:lazyNovel.toggleChapterPreview",
+    "onCommand:lazyNovel.toggleReadingMode",
+    "onCommand:lazyNovel.showHoverPreview",
+    "onCommand:lazyNovel.hideHoverPreview"
+  ],
   "contributes": {
     "commands": [
       {

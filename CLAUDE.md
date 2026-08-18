@@ -1,4 +1,4 @@
-# thief-reader - Claude 助手指南
+# lazy-novel - Claude 助手指南
 
 ## 项目概述
 
@@ -27,12 +27,14 @@
 ## 核心功能
 
 ### 文件支持
+
 - PDF 文件解析和阅读
 - TXT 纯文本文件阅读
 - EPUB 电子书阅读
 - 剪贴板文本内容阅读
 
 ### 阅读特性
+
 - 状态栏显示阅读内容
 - 章节预览弹窗
 - 位置记忆功能
@@ -68,6 +70,7 @@
 ## 调试和测试
 
 项目配置了完整的调试环境：
+
 - `.vscode/launch.json` - 调试配置
 - `jsconfig.json` - JavaScript 项目配置
 - `eslint.config.mjs` - 代码规范配置
