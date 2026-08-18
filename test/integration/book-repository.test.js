@@ -1,12 +1,15 @@
 // test/integration/book-repository.test.js
 const assert = require('assert');
+require('../setup');
 const { BookRepository } = require('../../src/library/BookRepository');
 const { GLOBAL_STATE_KEYS } = require('../../src/storage/Schema');
 
 suite('BookRepository (stub)', () => {
   test('list, add, get, update, remove round-trip', async () => {
     const ctx = global.__lazyNovelTestContext;
-    if (!ctx) return;
+    if (!ctx) {
+      throw new Error('test host did not inject __lazyNovelTestContext');
+    }
     await ctx.globalState.update(GLOBAL_STATE_KEYS.books, undefined);
     await ctx.globalState.update(GLOBAL_STATE_KEYS.readingState, undefined);
 
@@ -38,7 +41,9 @@ suite('BookRepository (stub)', () => {
 
   test('reading state round-trip', async () => {
     const ctx = global.__lazyNovelTestContext;
-    if (!ctx) return;
+    if (!ctx) {
+      throw new Error('test host did not inject __lazyNovelTestContext');
+    }
     await ctx.globalState.update(GLOBAL_STATE_KEYS.readingState, undefined);
     const repo = new BookRepository(ctx);
     assert.deepStrictEqual(await repo.loadReadingState(), {

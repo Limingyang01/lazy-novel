@@ -1,15 +1,14 @@
 // test/integration/migration.test.js
 const assert = require('assert');
+require('../setup');
 const { migrateIfNeeded } = require('../../src/library/Migration');
 const { GLOBAL_STATE_KEYS } = require('../../src/storage/Schema');
 
 suite('Migration', () => {
   test('copies thief-reader.files to lazy-novel.books with translated fields', async () => {
-    // Skip gracefully when the test host has not injected an ExtensionContext
-    // (Task 14 wires `global.__lazyNovelTestContext`; until then this test skips.)
     const ctx = global.__lazyNovelTestContext;
     if (!ctx) {
-      return;
+      throw new Error('test host did not inject __lazyNovelTestContext');
     }
     // Seed old key
     const oldFiles = [
@@ -50,7 +49,9 @@ suite('Migration', () => {
 
   test('skips when new key already present', async () => {
     const ctx = global.__lazyNovelTestContext;
-    if (!ctx) return;
+    if (!ctx) {
+      throw new Error('test host did not inject __lazyNovelTestContext');
+    }
     await ctx.globalState.update(GLOBAL_STATE_KEYS.books, [{ id: 'x' }]);
     await ctx.globalState.update('thief-reader.files', [{ id: 'y' }]);
 
@@ -62,7 +63,9 @@ suite('Migration', () => {
 
   test('skips when no old key present', async () => {
     const ctx = global.__lazyNovelTestContext;
-    if (!ctx) return;
+    if (!ctx) {
+      throw new Error('test host did not inject __lazyNovelTestContext');
+    }
     await ctx.globalState.update(GLOBAL_STATE_KEYS.books, undefined);
     await ctx.globalState.update('thief-reader.files', undefined);
 

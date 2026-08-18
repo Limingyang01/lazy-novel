@@ -2,13 +2,10 @@ const assert = require('assert');
 const { ChapterParser } = require('../../src/chapter/ChapterParser');
 
 suite('ChapterParser', () => {
-  test('returns single chapter when no marker matches', () => {
+  test('returns empty array when no marker matches (fallback is controller responsibility)', () => {
     const p = new ChapterParser();
     const chapters = p.parse('just some text\nline 2');
-    assert.strictEqual(chapters.length, 1);
-    assert.strictEqual(chapters[0].title, '全文');
-    assert.strictEqual(chapters[0].startOffset, 0);
-    assert.strictEqual(chapters[0].charCount, 'just some text\nline 2'.length);
+    assert.strictEqual(chapters.length, 0);
   });
 
   test('matches Chinese "第X章"', () => {

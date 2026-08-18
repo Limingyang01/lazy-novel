@@ -81,9 +81,8 @@ class ChapterParser {
       chapters.push(current);
     }
 
-    if (chapters.length === 0) {
-      return [{ index: 0, title: '全文', startOffset: 0, charCount: text.length }];
-    }
+    // Spec §3 B4: return [] when no chapters match (matches thief-reader behavior).
+    // Fallback chapter generation is the ReaderController's responsibility (T11).
     return chapters;
   }
 
