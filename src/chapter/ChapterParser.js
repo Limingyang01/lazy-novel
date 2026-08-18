@@ -62,15 +62,15 @@ class ChapterParser {
 
       if (isChapter) {
         if (current) {
-          current.charCount = current._endOffset - current.startOffset;
-          delete current._endOffset;
+          // Finalize previous chapter: its end is the offset of THIS line.
+          const startOffset = this._offsetOf(lines, i);
+          current.charCount = startOffset - current.startOffset;
           chapters.push(current);
         }
         current = {
           index: chapterIndex++,
           title: chapterTitle,
           startOffset: this._offsetOf(lines, i),
-          _endOffset: 0,
         };
       }
     }
