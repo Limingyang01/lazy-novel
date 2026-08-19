@@ -76,19 +76,16 @@ suite('章节标题识别', () => {
 });
 
 suite('readTextFileAutoEncoding（自动识别 GBK / UTF-8）', () => {
-	// 从 extension.js 动态抠出函数体再 eval，避免把 iconv-lite 写两份
-	function loadReadTextFile() {
-		const source = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
-		const match = source.match(/function readTextFileAutoEncoding\(filePath\) \{([\s\S]*?)\n\}/);
-		assert.ok(match, '未能在 extension.js 中定位 readTextFileAutoEncoding');
-		// 重新包成 require 风格：先建一个把 iconv 注入的 fn
-		const iconv = require('iconv-lite');
-		return new Function('iconv', 'fs', `${match[1]}; return readTextFileAutoEncoding;`)(iconv, fs);
-	}
+	// 直接用 extension.js 导出的函数，不再抠源码 eval：
+	// 之前只抠到函数体、拿不到函数名，5 个用例全挂在 filePath is not defined
+	const { readTextFileAutoEncoding } = require('../extension');
+	const loadReadTextFile = () => readTextFileAutoEncoding;
 
 	const tmpDir = path.join(__dirname, '.tmp-encoding');
-	before(() => fs.mkdirSync(tmpDir, { recursive: true }));
-	after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+	// 项目用 mocha 的 tdd 接口（suite/test），钩子是 suiteSetup/suiteTeardown，
+	// 写成 before/after 会在文件加载阶段抛 ReferenceError，导致整个套件一个都跑不起来
+	suiteSetup(() => fs.mkdirSync(tmpDir, { recursive: true }));
+	suiteTeardown(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
 	function write(name, buf) {
 		const p = path.join(tmpDir, name);

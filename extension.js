@@ -16,19 +16,28 @@ const iconv = require('iconv-lite')
  * 不能见一个 U+FFFD 就回退：合法 UTF-8 文件偶尔含 1-2 个真替换字符（极少见但存在）
  * 会被误判为 GBK → 重读后引入新乱码。用 0.1% 比例阈值更稳。
  */
+
+// 小于这个字节数就不做编码推断：样本太小，推断结果不可靠
+const MIN_ENCODING_SAMPLE_BYTES = 32
 function readTextFileAutoEncoding(filePath) {
 	const buf = fs.readFileSync(filePath)
 	// UTF-8 BOM: EF BB BF
 	if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
 		return buf.toString('utf8').slice(1)
 	}
+
 	const utf8 = buf.toString('utf8')
-	// 极短文本（< 200 字符）不做比例判定，避免除零和抖小样本
-	if (utf8.length < 200) {
+	// U+FFFD 是 UTF-8 解码失败的「替换字符」。一个都没有 = 合法 UTF-8，直接用。
+	const replacementCount = (utf8.match(/�/g) || []).length
+	if (replacementCount === 0) {
 		return utf8
 	}
-	// U+FFFD 是 UTF-8 解码失败的「替换字符」。比例 > 0.1% 才视为真不是 UTF-8。
-	const replacementCount = (utf8.match(/�/g) || []).length
+	// 样本太小时不做编码推断：几十字节里混进一两个坏字节，按 GBK 重读只会更糟。
+	// 注意门槛按「字节数」而不是「字符数」——按字符数会让所有短 GBK 文件都读成乱码。
+	if (buf.length < MIN_ENCODING_SAMPLE_BYTES) {
+		return utf8
+	}
+	// 比例 > 0.1% 才视为真不是 UTF-8，避免合法 UTF-8 里偶含真替换字符被误判
 	if (replacementCount / utf8.length > 0.001) {
 		return iconv.decode(buf, 'gb18030')
 	}
@@ -3806,5 +3815,6 @@ module.exports = {
 	deactivate,
 	nextPagePosition,
 	previousPagePosition,
+	readTextFileAutoEncoding,
 	DEFAULT_DISPLAY_LENGTH
 }
