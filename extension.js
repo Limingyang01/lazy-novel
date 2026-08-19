@@ -1849,6 +1849,7 @@ class ThiefReaderWebviewProvider {
 		this._loadOpacity() // 从配置中加载透明度
 		this._loadDisplayLength() // 从配置中加载一屏显示字符数
 		this._initStatusBar()
+		this._registerKeyBindings()
 		this._registerReadingMode()
 		this._watchDisplayLength()
 		// 移除旧的悬停功能初始化，新功能直接集成到状态栏按钮中
@@ -2411,9 +2412,9 @@ class ThiefReaderWebviewProvider {
 			undefined,
 			this._context.subscriptions
 		)
-
-		// 注册键盘快捷键
-		this._registerKeyBindings()
+		// 命令注册不能放在这里：resolveWebviewView 会被 VSCode 反复调用
+		// （视图恢复、侧边栏隐藏后重新显示、窗口重载），第二次 registerCommand
+		// 会抛 command already exists，表现为「还原视图时出错」。已移到构造函数。
 	}
 
 	/**

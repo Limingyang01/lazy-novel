@@ -11,6 +11,26 @@ suite('package.json 与 extension.js id 一致性', () => {
 	const registeredCommands = [...source.matchAll(/registerCommand\('([^']+)'/g)].map(m => m[1]);
 	const registeredViews = [...source.matchAll(/registerWebviewViewProvider\('([^']+)'/g)].map(m => m[1]);
 
+	// resolveWebviewView 会被 VSCode 反复调用（视图恢复、侧边栏隐藏后重新显示、
+	// 窗口重载）。把一次性注册放进去，第二次就会抛 command already exists，
+	// 表现为侧边栏「还原视图时出错: lazy-novel-main」。
+	test('resolveWebviewView 内不做一次性注册', () => {
+		const body = source.match(/\tresolveWebviewView\(webviewView\) \{([\s\S]*?)\n\t\}/);
+		assert.ok(body, '未能定位 resolveWebviewView');
+
+		const code = body[1]
+			.split('\n')
+			.filter(line => !line.trim().startsWith('//'))
+			.join('\n');
+
+		for (const forbidden of ['registerCommand', 'registerWebviewViewProvider', 'createStatusBarItem']) {
+			assert.ok(
+				!code.includes(forbidden),
+				`resolveWebviewView 里不应调用 ${forbidden}，重复 resolve 时会抛错导致视图还原失败`
+			);
+		}
+	});
+
 	test('声明的 webview view id 有对应的 provider 注册', () => {
 		const declaredViews = Object.values(pkg.contributes.views)
 			.flat()
