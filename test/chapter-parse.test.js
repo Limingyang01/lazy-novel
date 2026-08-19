@@ -52,6 +52,13 @@ suite('章节标题识别', () => {
 		'',
 		'第一卷 介绍',                  // 只有卷没有章，不应被识别
 		'我们来到第一卷 第001章 杜承',   // 不以「第N卷」开头，新正则有 ^ 锚定
+
+		// 纯装饰线。21MB 的实际小说里有 2569 条 ------------，
+		// 曾被 ---标题--- 正则回溯匹配成功（捕获组吃掉分隔符自身）→ 2569 个空标题章节
+		'------------',
+		'============',
+		'************',
+		'____________',
 	];
 
 	test('常见章节标题都能识别', () => {
@@ -64,6 +71,31 @@ suite('章节标题识别', () => {
 		for (const line of shouldNotMatch) {
 			assert.ok(!matches(line), `正文被误判成章节标题: "${line}"`);
 		}
+	});
+
+	test('装饰线不会被「全大写英文标题」检查捞回来', () => {
+		// 那个检查的字符类 [A-Z\s\d\-_] 含 - 和 _，纯分隔线会整行匹配，
+		// 所以必须额外要求含至少一个字母
+		const looksLikeUpperTitle = line => /^[A-Z\s\d\-_]+$/.test(line) && /[A-Z]/.test(line);
+
+		assert.ok(!looksLikeUpperTitle('------------'), '纯横线不该算英文标题');
+		assert.ok(!looksLikeUpperTitle('____________'), '纯下划线不该算英文标题');
+		assert.ok(!looksLikeUpperTitle('123 456'), '纯数字不该算英文标题');
+		assert.ok(looksLikeUpperTitle('CHAPTER ONE'), '真正的大写标题仍要能识别');
+		assert.ok(looksLikeUpperTitle('PART 2 - INTRO'), '带连字符的大写标题仍要能识别');
+	});
+
+	test('从标题行提取章号，供列表定位', () => {
+		const source = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+		const fn = source.match(/function extractChapterNumber\(line\) \{[\s\S]*?\n\}/);
+		assert.ok(fn, '未能定位 extractChapterNumber');
+		const extractChapterNumber = new Function(`${fn[0]}\nreturn extractChapterNumber;`)();
+
+		assert.strictEqual(extractChapterNumber('第一章 山边小村'), '第一章');
+		assert.strictEqual(extractChapterNumber('第一百章 嘉元城'), '第一百章');
+		assert.strictEqual(extractChapterNumber('第两千四百四十六章 飞升仙界'), '第两千四百四十六章');
+		assert.strictEqual(extractChapterNumber('第一卷 成长之路 第001章 杜家私生子'), '第001章');
+		assert.strictEqual(extractChapterNumber('【卷一 启程】'), '', '没有章号时返回空串');
 	});
 
 	test('卷+章格式的捕获标题只取「章名」部分', () => {

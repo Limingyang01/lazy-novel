@@ -19,6 +19,15 @@ const iconv = require('iconv-lite')
 
 // 小于这个字节数就不做编码推断：样本太小，推断结果不可靠
 const MIN_ENCODING_SAMPLE_BYTES = 32
+
+/**
+ * 从章节标题行里取出「第X章」，没有则返回空串。
+ * 章节标题被剥成了纯章名（「山边小村」），列表里没有章号无法定位到第几章。
+ */
+function extractChapterNumber(line) {
+	const match = line.match(/第[零一二三四五六七八九十百千万亿两\d]+章/)
+	return match ? match[0] : ''
+}
 function readTextFileAutoEncoding(filePath) {
 	const buf = fs.readFileSync(filePath)
 	// UTF-8 BOM: EF BB BF
@@ -2455,7 +2464,7 @@ class ThiefReaderWebviewProvider {
 						.map(
 							(chapter, index) => `
 				<div class="chapter-item ${this._currentChapter === index ? 'active' : ''}" data-chapter-id="${index}">
-					<div class="chapter-title" onclick="selectChapter(${index})">${chapter.title}</div>
+					<div class="chapter-title" onclick="selectChapter(${index})"><span class="chapter-number">${chapter.number || `#${index + 1}`}</span>${chapter.title}</div>
 				</div>
 			`
 						)
@@ -2550,6 +2559,11 @@ class ThiefReaderWebviewProvider {
 				.chapter-title {
 					font-size: 12px;
 					margin-bottom: 5px;
+				}
+				.chapter-number {
+					color: var(--vscode-descriptionForeground);
+					margin-right: 6px;
+					white-space: nowrap;
 				}
 				.file-actions {
 					display: flex;
@@ -3281,10 +3295,12 @@ class ThiefReaderWebviewProvider {
 			/^Chapter\s+\d+\s*[:\-]?\s*(.+)/i,
 			/^CHAPTER\s+\d+\s*[:\-]?\s*(.+)/i,
 
-			// 标题模式（适用于TXT文件）
-			/^={3,}\s*(.+)\s*={3,}/, // ===标题===
-			/^-{3,}\s*(.+)\s*-{3,}/, // ---标题---
-			/^\*{3,}\s*(.+)\s*\*{3,}/, // ***标题***
+			// 标题模式（适用于TXT文件）。捕获组必须以非分隔符开头，否则纯装饰线会被当成标题：
+			// 「------------」会被回溯拆成 ---「------」--- 匹配成功，标题清理后变空串，
+			// 于是每条分隔线都产生一个空章节（21MB 的实际小说文件里有 2569 条）。
+			/^={3,}\s*([^=\s][^=]*?)\s*={3,}/, // ===标题===
+			/^-{3,}\s*([^-\s][^-]*?)\s*-{3,}/, // ---标题---
+			/^\*{3,}\s*([^*\s][^*]*?)\s*\*{3,}/, // ***标题***
 
 			// 简单的标题模式
 			/^【(.+)】$/, // 【标题】
@@ -3317,8 +3333,10 @@ class ThiefReaderWebviewProvider {
 
 			// 额外检查：如果行很短且看起来像标题
 			if (!isChapter && line.length > 2 && line.length < 50) {
-				// 检查是否全部是大写字母（可能是英文标题）
-				if (/^[A-Z\s\d\-_]+$/.test(line)) {
+				// 检查是否全部是大写字母（可能是英文标题）。
+				// 必须含至少一个字母：字符类里有 - 和 _，否则 ------------ / ______
+				// 这类纯分隔线会整行匹配，被当成标题。
+				if (/^[A-Z\s\d\-_]+$/.test(line) && /[A-Z]/.test(line)) {
 					isChapter = true
 					chapterTitle = line
 				}
@@ -3327,6 +3345,12 @@ class ThiefReaderWebviewProvider {
 					isChapter = true
 					chapterTitle = line
 				}
+			}
+
+			// 兜底：标题清理后为空的行不算章节。装饰线、纯符号行走到这里会被拦下，
+			// 否则章节列表里会出现一堆点不动、也认不出的空条目。
+			if (isChapter && chapterTitle === '') {
+				isChapter = false
 			}
 
 			if (isChapter) {
@@ -3338,6 +3362,8 @@ class ThiefReaderWebviewProvider {
 				// 开始新章节
 				currentChapter = {
 					title: chapterTitle,
+					// 原文里的「第X章」，供章节列表定位用（标题本身已把章号剥掉了）
+					number: extractChapterNumber(line),
 					startLine: i,
 					content: []
 				}
@@ -3520,7 +3546,7 @@ class ThiefReaderWebviewProvider {
 		if (this._currentFile) {
 			lines.push(`《${this._currentFile.name}》`)
 		}
-		lines.push(`章节：${chapter.title}`)
+		lines.push(`章节：${chapter.number ? `${chapter.number} ` : ''}${chapter.title}`)
 		lines.push(`进度：${this._scrollOffset}-${actualEndPos} / ${totalLength} 字（${percent}%）`)
 		if (this._floatingWindowManager.isVisible()) {
 			lines.push('章节预览：已打开')
