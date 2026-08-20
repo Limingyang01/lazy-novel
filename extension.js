@@ -59,6 +59,20 @@ function readTextFileAutoEncoding(filePath) {
 // 默认按中文取 40：汉字宽度约为英文的两倍，80 个汉字在多数窗口下会被截断。
 const DEFAULT_DISPLAY_LENGTH = 40
 
+// 宽度调节的上下限和步长，跟 package.json 里 displayLength 的 minimum/maximum 保持一致
+const MIN_DISPLAY_LENGTH = 10
+const MAX_DISPLAY_LENGTH = 200
+const DISPLAY_LENGTH_STEP = 5
+
+/**
+ * 按步长调宽/调窄一屏字符数，夹在合法区间内。
+ * 到边界时返回原值，调用方据此提示「已到最窄/最宽」。
+ */
+function adjustDisplayLength(current, delta) {
+	const base = Number.isFinite(current) && current > 0 ? current : DEFAULT_DISPLAY_LENGTH
+	return Math.max(MIN_DISPLAY_LENGTH, Math.min(MAX_DISPLAY_LENGTH, base + delta))
+}
+
 // globalState 存储键。统一到 lazy-novel.* 前缀，
 // 旧键 thief-reader.* 只用于一次性迁移：读到就搬到新键并清掉，
 // 否则老用户升级后书库会凭空消失。
@@ -73,8 +87,8 @@ const LEGACY_STORAGE_KEYS = {
 
 // 状态栏悬浮提示里固定的快捷键说明
 const READING_SHORTCUT_HINT = [
-	'Alt + S 开关阅读模式（2 向后 / 1 向前）',
-	'Shift + 空格 显示/隐藏',
+	'Alt + S 开关阅读模式（2 向后 / 1 向前，4 变宽 / 3 变窄）',
+	'Shift + Alt + 空格 显示/隐藏',
 	'Ctrl + Alt + H 章节预览'
 ].join('\n')
 
@@ -3609,13 +3623,43 @@ class ThiefReaderWebviewProvider {
 			this._toggleStatusBarVisibility()
 		})
 
+		// 宽度调节：阅读模式下 4 变宽 / 3 变窄，相当于用键盘「拖」状态栏宽度
+		const widenCommand = vscode.commands.registerCommand('lazyNovel.widenDisplay', () => {
+			this._resizeDisplay(DISPLAY_LENGTH_STEP)
+		})
+
+		const narrowCommand = vscode.commands.registerCommand('lazyNovel.narrowDisplay', () => {
+			this._resizeDisplay(-DISPLAY_LENGTH_STEP)
+		})
+
 		this._context.subscriptions.push(
 			previousPageCommand,
 			nextPageCommand,
 			scrollLeftCommand,
 			scrollRightCommand,
-			toggleVisibilityCommand
+			toggleVisibilityCommand,
+			widenCommand,
+			narrowCommand
 		)
+	}
+
+	/**
+	 * 调整状态栏一屏宽度并写回配置。
+	 *
+	 * ponytail: VSCode 没有「拖拽状态栏项」的 API，鼠标事件到不了状态栏，
+	 * 所以用按键连点当拖拽——按住不放会连续触发，手感接近拉宽度。
+	 * 写配置后由 _watchDisplayLength() 负责重绘，不在这里重复渲染。
+	 */
+	_resizeDisplay(delta) {
+		const next = adjustDisplayLength(this._displayLength, delta)
+		if (next === this._displayLength) {
+			vscode.window.setStatusBarMessage(delta > 0 ? '已到最宽' : '已到最窄', 1000)
+			return
+		}
+
+		vscode.workspace.getConfiguration('lazyNovel')
+			.update('displayLength', next, vscode.ConfigurationTarget.Global)
+		vscode.window.setStatusBarMessage(`一屏宽度：${next} 字`, 1000)
 	}
 
 	/**
@@ -3843,5 +3887,9 @@ module.exports = {
 	nextPagePosition,
 	previousPagePosition,
 	readTextFileAutoEncoding,
-	DEFAULT_DISPLAY_LENGTH
+	adjustDisplayLength,
+	DEFAULT_DISPLAY_LENGTH,
+	MIN_DISPLAY_LENGTH,
+	MAX_DISPLAY_LENGTH,
+	DISPLAY_LENGTH_STEP
 }

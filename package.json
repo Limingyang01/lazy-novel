@@ -36,6 +36,8 @@
     "onCommand:lazyNovel.toggleVisibility",
     "onCommand:lazyNovel.toggleChapterPreview",
     "onCommand:lazyNovel.toggleReadingMode",
+    "onCommand:lazyNovel.widenDisplay",
+    "onCommand:lazyNovel.narrowDisplay",
     "onCommand:lazyNovel.showHoverPreview",
     "onCommand:lazyNovel.hideHoverPreview"
   ],
@@ -77,6 +79,16 @@
         "category": "Lazy Novel"
       },
       {
+        "command": "lazyNovel.widenDisplay",
+        "title": "Lazy Novel: 加宽一屏显示",
+        "category": "Lazy Novel"
+      },
+      {
+        "command": "lazyNovel.narrowDisplay",
+        "title": "Lazy Novel: 收窄一屏显示",
+        "category": "Lazy Novel"
+      },
+      {
         "command": "lazyNovel.showHoverPreview",
         "title": "Lazy Novel: 显示悬停预览",
         "category": "Lazy Novel"
@@ -103,8 +115,18 @@
         "when": "lazyNovel.readingMode && !terminalFocus"
       },
       {
+        "command": "lazyNovel.narrowDisplay",
+        "key": "3",
+        "when": "lazyNovel.readingMode && !terminalFocus"
+      },
+      {
+        "command": "lazyNovel.widenDisplay",
+        "key": "4",
+        "when": "lazyNovel.readingMode && !terminalFocus"
+      },
+      {
         "command": "lazyNovel.toggleVisibility",
-        "key": "shift+space"
+        "key": "shift+alt+space"
       },
       {
         "command": "lazyNovel.showHoverPreview",
